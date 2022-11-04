@@ -1,1 +1,0 @@
-# ash-suzuki.github.io
