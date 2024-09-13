@@ -94,7 +94,7 @@ nav {
 }
 
 nav a {
-    color: #a88;    
+    color: #966;    
     font-weight: bold;
     font-size: 0.9rem;
     text-align: center;
@@ -105,7 +105,7 @@ nav a {
 }
 
 nav a:hover {
-    color: #c86;
+    color: #c77;
     transition: color 0.2s ease;
 }
 
@@ -166,11 +166,11 @@ footer p {
     }
 
     nav a {
-        color: #a88;    
+        color: #b99;    
     }
 
     nav a:hover {
-        color: #d99;
+        color: #ebb;
         transition: color 0.2s ease;
     }
 
