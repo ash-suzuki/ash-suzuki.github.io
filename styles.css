@@ -151,14 +151,18 @@ footer p {
     }
 
     header, footer {
-        background-color: #223;
+        background-color: #322;
     }
 /*    .logo {
         background-color: #111;
     }
 */
-    main h1, h2, strong {
-        color: #dde;    
+    div.logo {
+        color: #edd;
+    }
+
+    main h1, h2, h3, h4, h5, h6, strong {
+        color: #edd;    
     }
 
 }
