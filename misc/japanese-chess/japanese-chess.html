@@ -1,0 +1,1605 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>オフライン将棋</title>
+  <style>
+    :root {
+      /* ---- 見た目に関するパラメータ ---- */
+      --board-bg: #d8b17a;        /* 盤の色（明るい褐色） */
+      --board-line: #000000;      /* マスの枠線 */
+      --cell-border-width: 1px;
+
+      --move-animation-ms: 200;   /* 駒の移動アニメーション時間 */
+      --promote-fade-ms: 200;     /* 成りのフェード時間 */
+
+      --last-move-border: 3px solid #ffcc00; /* 最終着手の強調枠 */
+
+      --piece-scale-hint: 0.6;    /* 合法手ハイライトの縮小率（※inset で表現） */
+      --piece-hint-opacity: 0.25; /* 合法手ハイライトの透明度（より透明に） */
+
+      --turn-brightness: 1.15;    /* 手番側の駒の明るさ */
+      --turn-cell-bg: #ead19f;    /* 手番側の駒が乗っているマスの背景色（盤よりもう少し明るく） */
+
+      /* 駒文字のフォントサイズ（通常） */
+      --piece-font-kanji: clamp(0.5rem, 2vw, 0.7rem);
+      --piece-font-kana:  clamp(0.3rem, 1.4vw, 0.4rem);
+
+      /* 合法手ハイライト駒用（小さめ） */
+      --piece-hint-font-kanji: clamp(0.3rem, 1.2vw, 0.42rem);
+      --piece-hint-font-kana:  clamp(0.18rem, 0.84vw, 0.24rem);
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: hidden;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        sans-serif;
+      background: #f2f2f2;
+      display: flex;
+      justify-content: center;
+    }
+
+    #app {
+      width: 100%;
+      max-width: 800px;
+      padding: 8px;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .controls button {
+      padding: 6px 12px;
+      border-radius: 4px;
+      border: none;
+      background: #444;
+      color: #fff;
+      font-size: clamp(0.7rem, 2.5vw, 0.9rem);
+      cursor: pointer;
+      min-width: 0;
+      word-break: break-all;
+    }
+
+    .controls button:active {
+      transform: translateY(1px);
+      opacity: 0.9;
+    }
+
+    #gameContainer {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .hand {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+    }
+
+    .hand-inner {
+      width: 100%;
+      max-width: 440px;
+      border: 2px solid #555;
+      background: #e0e0e0;
+      padding: 4px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-content: flex-start;
+      gap: 4px;
+      position: relative;
+      height: 70px; /* 駒1段分固定 */
+    }
+
+    #boardWrapper {
+      width: 100%;
+      max-width: 440px;
+    }
+
+    /* 盤本体 */
+    #board {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 11 / 12; /* マス縦横比 12:11 に対応 */
+      background: var(--board-bg);
+      border: 2px solid #000;
+      display: grid;
+      grid-template-columns: repeat(9, 1fr);
+      grid-template-rows: repeat(9, 1fr);
+    }
+
+    .cell {
+      position: relative;
+      border: var(--cell-border-width) solid var(--board-line);
+      overflow: hidden;
+      background: var(--board-bg);
+    }
+
+    .cell-inner {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    /* 最後の着手マスの強調 */
+    .cell.last-move {
+      box-shadow: 0 0 0 3px #ffcc00 inset;
+    }
+
+    /* 選択中マスの背景 */
+    .cell.selected-cell {
+      background: #fff9c4;
+    }
+
+    /* 手番側の駒マス（非選択時）をわずかに明るく */
+    .cell.turn-cell {
+      background: var(--turn-cell-bg);
+    }
+
+    /* 駒共通 */
+    .piece {
+      position: absolute;
+      inset: 4%;
+      clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2px;
+      cursor: pointer;
+      transition:
+        transform calc(var(--move-animation-ms) * 1ms) linear,
+        background-color calc(var(--promote-fade-ms) * 1ms) linear,
+        color calc(var(--promote-fade-ms) * 1ms) linear;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+
+    /* 後手駒は駒そのものを 180 度回転（形＋文字） */
+    .piece.white {
+      transform: rotate(180deg);
+    }
+
+    .piece-body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+      writing-mode: horizontal-tb;
+      line-height: 1;
+      transform: translateY(10%); /* プレイヤー側寄りに */
+    }
+
+    .piece-text-kanji {
+      font-size: var(--piece-font-kanji);
+      font-weight: bold;
+      writing-mode: vertical-rl;
+      text-orientation: upright;
+      display: inline-block;
+    }
+
+    .piece-text-kana {
+      font-size: var(--piece-font-kana); /* パラメータ使用 */
+      writing-mode: horizontal-tb;
+      margin-top: 2px;
+    }
+
+    /* 合法手ハイライト駒の文字サイズを小さくする */
+    .move-hint .piece-text-kanji {
+      font-size: var(--piece-hint-font-kanji);
+    }
+    .move-hint .piece-text-kana {
+      font-size: var(--piece-hint-font-kana);
+    }
+
+    /* 手番ハイライト（先手番） */
+    .turn-black .piece.black {
+      filter: brightness(var(--turn-brightness));
+    }
+    /* 手番ハイライト（後手番） */
+    .turn-white .piece.white {
+      filter: brightness(var(--turn-brightness));
+    }
+
+    /* 駒ごとの色 */
+    .piece-ou {
+      background-color: #ffffff;
+      color: #000000;
+    }
+    .piece-hi {
+      background-color: #1e88e5;
+      color: #ffffff;
+    }
+    .piece-ry {
+      background-color: #1e88e5;
+      color: #ffeb3b;
+    }
+    .piece-ka {
+      background-color: #e53935;
+      color: #ffffff;
+    }
+    .piece-um {
+      background-color: #e53935;
+      color: #ffeb3b;
+    }
+    .piece-ki {
+      background-color: #ffeb3b;
+      color: #000000;
+    }
+    .piece-gi {
+      background-color: #9e9e9e;
+      color: #ffffff;
+    }
+    .piece-ng {
+      background-color: #9e9e9e;
+      color: #ffeb3b;
+    }
+    .piece-ke {
+      background-color: #795548;
+      color: #ffffff;
+    }
+    .piece-nk {
+      background-color: #795548;
+      color: #ffeb3b;
+    }
+    .piece-ky {
+      background-color: #4caf50;
+      color: #ffffff;
+    }
+    .piece-ny {
+      background-color: #4caf50;
+      color: #ffeb3b;
+    }
+    .piece-fu {
+      background-color: #000000;
+      color: #ffffff;
+    }
+    .piece-to {
+      background-color: #000000;
+      color: #ffeb3b;
+    }
+
+    /* 金銀桂香歩とその成り駒だけ少し小さくする */
+    .piece-ki,
+    .piece-gi,
+    .piece-ng,
+    .piece-ke,
+    .piece-nk,
+    .piece-ky,
+    .piece-ny,
+    .piece-fu,
+    .piece-to {
+      inset: 8%;
+    }
+
+    /* 合法手ハイライト：小さく & かなり透明に */
+    .move-hint {
+      pointer-events: none;
+      opacity: var(--piece-hint-opacity);
+      inset: 18%;
+    }
+
+    /* 駒台の駒 */
+    .hand-piece-wrapper {
+      position: relative;
+      width: 11.11%;
+      padding-top: calc(11.11% * 12 / 11); /* 盤と同じ縦横比 */
+    }
+
+    .hand-piece {
+      position: absolute;
+      inset: 10%;
+    }
+
+    .hand-count {
+      position: absolute;
+      right: 2px;
+      bottom: 0px;
+      font-size: clamp(0.5rem, 1.8vw, 0.6rem);
+      background: rgba(0, 0, 0, 0.6);
+      color: #fff;
+      padding: 0 3px;
+      border-radius: 8px;
+    }
+
+    /* カスタム画像を使う場合、テキストは非表示にする */
+    .piece.custom-image .piece-body {
+      display: none;
+    }
+
+    /* 成り確認ダイアログ */
+    #promoteOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    #promoteDialog {
+      background: #ffffff;
+      padding: 16px;
+      border-radius: 8px;
+      max-width: 260px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      font-size: 0.9rem;
+    }
+
+    #promoteDialogButtons {
+      margin-top: 12px;
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+    }
+
+    #promoteDialogButtons button {
+      padding: 6px 16px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    #promoteYes {
+      background: #1976d2;
+      color: #fff;
+    }
+
+    #promoteNo {
+      background: #9e9e9e;
+      color: #fff;
+    }
+
+    @media (max-width: 480px) {
+      .controls button {
+        flex: 1 1 calc(50% - 8px);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="controls">
+      <button id="newGameBtn">新規対局（対局破棄）</button>
+      <button id="undoBtn">待った</button>
+      <button id="designBtn">駒デザイン変更</button>
+      <input
+        type="file"
+        id="designInput"
+        webkitdirectory
+        multiple
+        accept="image/png"
+        style="display: none"
+      />
+    </div>
+
+    <div id="gameContainer" class="turn-black">
+      <!-- 後手駒台（上） -->
+      <div class="hand hand-white">
+        <div class="hand-inner" id="whiteHand"></div>
+      </div>
+
+      <!-- 盤 -->
+      <div id="boardWrapper">
+        <div id="board"></div>
+      </div>
+
+      <!-- 先手駒台（下） -->
+      <div class="hand hand-black">
+        <div class="hand-inner" id="blackHand"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 成り確認用のカスタムダイアログ -->
+  <div id="promoteOverlay">
+    <div id="promoteDialog">
+      <div>成りますか？</div>
+      <div id="promoteDialogButtons">
+        <button id="promoteYes">Yes</button>
+        <button id="promoteNo">No</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+
+    /*******************
+     * ゲーム設定・定数 *
+     *******************/
+
+    const CONFIG = {
+      animationMs: 200,
+      promoteFadeMs: 200,
+    };
+
+    const COLOR_BLACK = "black"; // 先手
+    const COLOR_WHITE = "white"; // 後手
+
+    // 駒タイプ
+    const PT = {
+      FU: "FU",
+      KY: "KY",
+      KE: "KE",
+      GI: "GI",
+      KI: "KI",
+      KA: "KA",
+      HI: "HI",
+      OU: "OU",
+      TO: "TO",
+      NY: "NY",
+      NK: "NK",
+      NG: "NG",
+      UM: "UM",
+      RY: "RY",
+    };
+
+    // 成り・不成りの対応
+    const PROMOTION_MAP = {
+      [PT.FU]: PT.TO,
+      [PT.KY]: PT.NY,
+      [PT.KE]: PT.NK,
+      [PT.GI]: PT.NG,
+      [PT.KA]: PT.UM,
+      [PT.HI]: PT.RY,
+    };
+
+    const DEMOTION_MAP = {
+      [PT.TO]: PT.FU,
+      [PT.NY]: PT.KY,
+      [PT.NK]: PT.KE,
+      [PT.NG]: PT.GI,
+      [PT.UM]: PT.KA,
+      [PT.RY]: PT.HI,
+      [PT.FU]: PT.FU,
+      [PT.KY]: PT.KY,
+      [PT.KE]: PT.KE,
+      [PT.GI]: PT.GI,
+      [PT.KI]: PT.KI,
+      [PT.KA]: PT.KA,
+      [PT.HI]: PT.HI,
+      [PT.OU]: PT.OU,
+    };
+
+    const PROMOTABLE = new Set([
+      PT.FU,
+      PT.KY,
+      PT.KE,
+      PT.GI,
+      PT.KA,
+      PT.HI,
+    ]);
+
+    // 駒の表示用情報
+    const PIECE_DISPLAY = {
+      [PT.OU]: { kanji: "王将", kana: "おうしょう", css: "piece-ou" },
+      [PT.HI]: { kanji: "飛車", kana: "ひしゃ", css: "piece-hi" },
+      [PT.RY]: { kanji: "龍王", kana: "りゅうおう", css: "piece-ry" },
+      [PT.KA]: { kanji: "角行", kana: "かくぎょう", css: "piece-ka" },
+      [PT.UM]: { kanji: "龍馬", kana: "りゅうま", css: "piece-um" },
+      [PT.KI]: { kanji: "金将", kana: "きんしょう", css: "piece-ki" },
+      [PT.GI]: { kanji: "銀将", kana: "ぎんしょう", css: "piece-gi" },
+      [PT.NG]: { kanji: "成銀", kana: "なりぎん", css: "piece-ng" },
+      [PT.KE]: { kanji: "桂馬", kana: "けいま", css: "piece-ke" },
+      [PT.NK]: { kanji: "成桂", kana: "なりけい", css: "piece-nk" },
+      [PT.KY]: { kanji: "香車", kana: "きょうしゃ", css: "piece-ky" },
+      [PT.NY]: { kanji: "成香", kana: "なりきょう", css: "piece-ny" },
+      [PT.FU]: { kanji: "歩兵", kana: "ふひょう", css: "piece-fu" },
+      [PT.TO]: { kanji: "と金", kana: "ときん", css: "piece-to" },
+    };
+
+    // 駒の移動定義（白番側から見た「前」を +1 とし、dir=true のとき色で反転）
+    const PIECE_MOVES = {
+      [PT.FU]: { dir: true, steps: [{ dr: 1, dc: 0 }] },
+      [PT.KY]: { dir: true, slides: [{ dr: 1, dc: 0 }] },
+      [PT.KE]: {
+        dir: true,
+        steps: [
+          { dr: 2, dc: -1 },
+          { dr: 2, dc: 1 },
+        ],
+      },
+      [PT.GI]: {
+        dir: true,
+        steps: [
+          { dr: 1, dc: -1 },
+          { dr: 1, dc: 0 },
+          { dr: 1, dc: 1 },
+          { dr: -1, dc: -1 },
+          { dr: -1, dc: 1 },
+        ],
+      },
+      [PT.KI]: {
+        dir: true,
+        steps: [
+          { dr: 1, dc: -1 },
+          { dr: 1, dc: 0 },
+          { dr: 1, dc: 1 },
+          { dr: 0, dc: -1 },
+          { dr: 0, dc: 1 },
+          { dr: -1, dc: 0 },
+        ],
+      },
+      [PT.OU]: {
+        dir: false,
+        steps: [
+          { dr: 1, dc: 0 },
+          { dr: -1, dc: 0 },
+          { dr: 0, dc: 1 },
+          { dr: 0, dc: -1 },
+          { dr: 1, dc: 1 },
+          { dr: 1, dc: -1 },
+          { dr: -1, dc: 1 },
+          { dr: -1, dc: -1 },
+        ],
+      },
+      [PT.HI]: {
+        dir: false,
+        slides: [
+          { dr: 1, dc: 0 },
+          { dr: -1, dc: 0 },
+          { dr: 0, dc: 1 },
+          { dr: 0, dc: -1 },
+        ],
+      },
+      [PT.RY]: {
+        dir: false,
+        slides: [
+          { dr: 1, dc: 0 },
+          { dr: -1, dc: 0 },
+          { dr: 0, dc: 1 },
+          { dr: 0, dc: -1 },
+        ],
+        steps: [
+          { dr: 1, dc: 1 },
+          { dr: 1, dc: -1 },
+          { dr: -1, dc: 1 },
+          { dr: -1, dc: -1 },
+        ],
+      },
+      [PT.KA]: {
+        dir: false,
+        slides: [
+          { dr: 1, dc: 1 },
+          { dr: 1, dc: -1 },
+          { dr: -1, dc: 1 },
+          { dr: -1, dc: -1 },
+        ],
+      },
+      [PT.UM]: {
+        dir: false,
+        slides: [
+          { dr: 1, dc: 1 },
+          { dr: 1, dc: -1 },
+          { dr: -1, dc: 1 },
+          { dr: -1, dc: -1 },
+        ],
+        steps: [
+          { dr: 1, dc: 0 },
+          { dr: -1, dc: 0 },
+          { dr: 0, dc: 1 },
+          { dr: 0, dc: -1 },
+        ],
+      },
+    };
+    // 成り駒の動き = 金
+    PIECE_MOVES[PT.TO] = PIECE_MOVES[PT.KI];
+    PIECE_MOVES[PT.NY] = PIECE_MOVES[PT.KI];
+    PIECE_MOVES[PT.NK] = PIECE_MOVES[PT.KI];
+    PIECE_MOVES[PT.NG] = PIECE_MOVES[PT.KI];
+
+    /**************
+     * ゲーム状態 *
+     **************/
+
+    function createInitialBoard() {
+      const board = Array.from({ length: 9 }, () =>
+        Array.from({ length: 9 }, () => null)
+      );
+
+      // 後手側（上）
+      const backRank = [
+        PT.KY,
+        PT.KE,
+        PT.GI,
+        PT.KI,
+        PT.OU,
+        PT.KI,
+        PT.GI,
+        PT.KE,
+        PT.KY,
+      ];
+      for (let c = 0; c < 9; c++) {
+        board[0][c] = { type: backRank[c], color: COLOR_WHITE };
+      }
+      board[1][1] = { type: PT.HI, color: COLOR_WHITE };
+      board[1][7] = { type: PT.KA, color: COLOR_WHITE };
+      for (let c = 0; c < 9; c++) {
+        board[2][c] = { type: PT.FU, color: COLOR_WHITE };
+      }
+
+      // 先手側（下）
+      for (let c = 0; c < 9; c++) {
+        board[8][c] = { type: backRank[c], color: COLOR_BLACK };
+      }
+      board[7][7] = { type: PT.HI, color: COLOR_BLACK };
+      board[7][1] = { type: PT.KA, color: COLOR_BLACK };
+      for (let c = 0; c < 9; c++) {
+        board[6][c] = { type: PT.FU, color: COLOR_BLACK };
+      }
+
+      return board;
+    }
+
+    function createInitialState() {
+      return {
+        board: createInitialBoard(),
+        hands: {
+          [COLOR_BLACK]: [],
+          [COLOR_WHITE]: [],
+        },
+        turn: COLOR_BLACK,
+        lastMove: null,
+      };
+    }
+
+    let state = createInitialState();
+    let history = []; // 待った用履歴
+
+    let selected = null; // { kind:'board', r,c,piece } | { kind:'hand', color,type }
+    let currentLegalTargets = [];
+
+    const customPieceImages = {}; // type -> objectURL
+
+    // 成りダイアログ関連
+    let promotionDialogHandler = null;
+    let isPromotionDialogOpen = false;
+
+    const promoteOverlayEl = document.getElementById("promoteOverlay");
+    const promoteYesBtn = document.getElementById("promoteYes");
+    const promoteNoBtn = document.getElementById("promoteNo");
+
+    function openPromotionDialog(onChoice) {
+      promotionDialogHandler = onChoice;
+      isPromotionDialogOpen = true;
+      promoteOverlayEl.style.display = "flex";
+    }
+
+    function closePromotionDialog() {
+      promotionDialogHandler = null;
+      isPromotionDialogOpen = false;
+      promoteOverlayEl.style.display = "none";
+    }
+
+    promoteYesBtn.addEventListener("click", () => {
+      if (promotionDialogHandler) {
+        const fn = promotionDialogHandler;
+        closePromotionDialog();
+        fn(true); // Yes -> 成り
+      }
+    });
+
+    promoteNoBtn.addEventListener("click", () => {
+      if (promotionDialogHandler) {
+        const fn = promotionDialogHandler;
+        closePromotionDialog();
+        fn(false); // No -> 不成
+      }
+    });
+
+    /*********************
+     * 盤・駒の描画関連   *
+     *********************/
+
+    const boardEl = document.getElementById("board");
+    const blackHandEl = document.getElementById("blackHand");
+    const whiteHandEl = document.getElementById("whiteHand");
+    const gameContainerEl = document.getElementById("gameContainer");
+
+    function clearElement(el) {
+      while (el.firstChild) el.removeChild(el.firstChild);
+    }
+
+    function updateTurnClass() {
+      if (state.turn === COLOR_BLACK) {
+        gameContainerEl.classList.add("turn-black");
+        gameContainerEl.classList.remove("turn-white");
+      } else {
+        gameContainerEl.classList.add("turn-white");
+        gameContainerEl.classList.remove("turn-black");
+      }
+    }
+
+    function render() {
+      renderBoard();
+      renderHands();
+      updateTurnClass();
+    }
+
+    function createPieceElement(piece, isHint = false) {
+      const disp = PIECE_DISPLAY[piece.type];
+      if (!disp) {
+        console.error("未知の駒タイプです:", piece.type);
+        const dummy = document.createElement("div");
+        dummy.style.width = "100%";
+        dummy.style.height = "100%";
+        dummy.style.background = "magenta";
+        return dummy;
+      }
+
+      const div = document.createElement("div");
+      div.classList.add("piece", piece.color, disp.css);
+      if (isHint) div.classList.add("move-hint");
+      div.dataset.type = piece.type;
+      div.dataset.color = piece.color;
+
+      const imgUrl = customPieceImages[piece.type];
+      if (imgUrl) {
+        div.classList.add("custom-image");
+        div.style.backgroundImage = `url(${imgUrl})`;
+      }
+
+      const body = document.createElement("div");
+      body.classList.add("piece-body");
+      const k = document.createElement("div");
+      k.classList.add("piece-text-kanji");
+      k.textContent = disp.kanji;
+      const kana = document.createElement("div");
+      kana.classList.add("piece-text-kana");
+      kana.textContent = disp.kana;
+      body.appendChild(k);
+      body.appendChild(kana);
+      div.appendChild(body);
+
+      return div;
+    }
+
+    function isLastMoveCell(r, c) {
+      const lm = state.lastMove;
+      if (!lm) return false;
+      const { from, to } = lm;
+      if (to && to.r === r && to.c === c) return true;
+      if (from && from.r === r && from.c === c) return true;
+      return false;
+    }
+
+    function renderBoard() {
+      clearElement(boardEl);
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          const cell = document.createElement("div");
+          cell.classList.add("cell");
+          cell.dataset.r = String(r);
+          cell.dataset.c = String(c);
+
+          const piece = state.board[r][c];
+
+          if (isLastMoveCell(r, c)) {
+            cell.classList.add("last-move");
+          }
+
+          // 何も選択していないとき、手番側の駒マスを少し明るく
+          if (
+            !selected &&
+            piece &&
+            piece.color === state.turn
+          ) {
+            cell.classList.add("turn-cell");
+          }
+
+          // 選択中マスの背景強調
+          if (
+            selected &&
+            selected.kind === "board" &&
+            selected.r === r &&
+            selected.c === c
+          ) {
+            cell.classList.add("selected-cell");
+          }
+
+          const inner = document.createElement("div");
+          inner.classList.add("cell-inner");
+          cell.appendChild(inner);
+
+          if (piece) {
+            const pieceEl = createPieceElement(piece, false);
+            pieceEl.dataset.r = String(r);
+            pieceEl.dataset.c = String(c);
+            inner.appendChild(pieceEl);
+          }
+
+          boardEl.appendChild(cell);
+        }
+      }
+
+      // 合法手ハイライト描画
+      currentLegalTargets.forEach((t) => {
+        const r = t.r;
+        const c = t.c;
+        const cell = boardEl.querySelector(
+          '.cell[data-r="' + r + '"][data-c="' + c + '"]'
+        );
+        if (!cell) return;
+        const inner = cell.querySelector(".cell-inner");
+        if (!inner) return;
+        const piece =
+          t.sourcePiece || { type: t.pieceType || PT.FU, color: state.turn };
+        const hintPiece = createPieceElement(piece, true);
+        inner.appendChild(hintPiece);
+      });
+    }
+
+    function countPieces(arr, type) {
+      return arr.filter((t) => t === type).length;
+    }
+
+    function renderHands() {
+      clearElement(blackHandEl);
+      clearElement(whiteHandEl);
+
+      [COLOR_BLACK, COLOR_WHITE].forEach((color) => {
+        const handArr = state.hands[color];
+        const handEl = color === COLOR_BLACK ? blackHandEl : whiteHandEl;
+
+        const typesToShow = [
+          PT.OU,
+          PT.HI,
+          PT.RY,
+          PT.KA,
+          PT.UM,
+          PT.KI,
+          PT.GI,
+          PT.NG,
+          PT.KE,
+          PT.NK,
+          PT.KY,
+          PT.NY,
+          PT.FU,
+          PT.TO,
+        ];
+
+        typesToShow.forEach((type) => {
+          const cnt = countPieces(handArr, type);
+          if (cnt <= 0) return;
+
+          const wrap = document.createElement("div");
+          wrap.classList.add("hand-piece-wrapper");
+          wrap.dataset.color = color;
+          wrap.dataset.type = type;
+
+          const pieceEl = createPieceElement({ type, color }, false);
+          pieceEl.classList.add("hand-piece");
+
+          // 持ち駒選択中の強調（ここは駒側でOK）
+          if (
+            selected &&
+            selected.kind === "hand" &&
+            selected.color === color &&
+            selected.type === type
+          ) {
+            pieceEl.style.boxShadow = "0 0 0 3px rgba(255,255,0,0.9) inset";
+          }
+
+          wrap.appendChild(pieceEl);
+
+          const countEl = document.createElement("div");
+          countEl.classList.add("hand-count");
+          countEl.textContent = String(cnt);
+          wrap.appendChild(countEl);
+
+          handEl.appendChild(wrap);
+        });
+      });
+    }
+
+    /***********************
+     * ルール・判定系関数   *
+     ***********************/
+
+    function cloneState(s) {
+      return JSON.parse(JSON.stringify(s));
+    }
+
+    function inBounds(r, c) {
+      return r >= 0 && r < 9 && c >= 0 && c < 9;
+    }
+
+    function isPromotionZone(color, r) {
+      return color === COLOR_BLACK ? r <= 2 : r >= 6;
+    }
+
+    function generateDestinationsForPiece(board, r, c) {
+      const piece = board[r][c];
+      if (!piece) return [];
+      const type = piece.type;
+      const def = PIECE_MOVES[type];
+      if (!def) return [];
+      const res = [];
+      // dir=true の駒は、白の「前」が +1、黒は -1 とする
+      const dirFactor = def.dir ? (piece.color === COLOR_BLACK ? -1 : 1) : 1;
+
+      if (def.steps) {
+        for (const s of def.steps) {
+          const dr = s.dr * dirFactor;
+          const dc = s.dc;
+          const nr = r + dr;
+          const nc = c + dc;
+          if (!inBounds(nr, nc)) continue;
+          const target = board[nr][nc];
+          if (!target || target.color !== piece.color) {
+            res.push({ r: nr, c: nc });
+          }
+        }
+      }
+
+      if (def.slides) {
+        for (const sl of def.slides) {
+          const dr = sl.dr * dirFactor;
+          const dc = sl.dc;
+          let nr = r + dr;
+          let nc = c + dc;
+          while (inBounds(nr, nc)) {
+            const target = board[nr][nc];
+            if (!target) {
+              res.push({ r: nr, c: nc });
+            } else {
+              if (target.color !== piece.color) {
+                res.push({ r: nr, c: nc });
+              }
+              break;
+            }
+            nr += dr;
+            nc += dc;
+          }
+        }
+      }
+
+      return res;
+    }
+
+    function findKing(board, color) {
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          const p = board[r][c];
+          if (p && p.type === PT.OU && p.color === color) {
+            return { r, c };
+          }
+        }
+      }
+      return null;
+    }
+
+    function isInCheck(stateToCheck, side) {
+      const board = stateToCheck.board;
+      const kingPos = findKing(board, side);
+      if (!kingPos) return false;
+      const enemy = side === COLOR_BLACK ? COLOR_WHITE : COLOR_BLACK;
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          const p = board[r][c];
+          if (!p || p.color !== enemy) continue;
+          const dests = generateDestinationsForPiece(board, r, c);
+          if (dests.some((d) => d.r === kingPos.r && d.c === kingPos.c)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function isIllegalDropSquareForPieceType(type, color, r) {
+      // 「行き場のない打ち」
+      if (type === PT.FU || type === PT.KY) {
+        // 先手は最終段（0行目）に打てない
+        if (color === COLOR_BLACK && r === 0) return true;
+        // 後手は最終段（8行目）に打てない
+        if (color === COLOR_WHITE && r === 8) return true;
+      }
+      if (type === PT.KE) {
+        // 先手は残り2段（0,1行目）に打てない
+        if (color === COLOR_BLACK && r <= 1) return true;
+        // 後手は残り2段（7,8行目）に打てない
+        if (color === COLOR_WHITE && r >= 7) return true;
+      }
+      return false;
+    }
+
+    function hasPawnInFile(board, color, c) {
+      for (let r = 0; r < 9; r++) {
+        const p = board[r][c];
+        if (p && p.type === PT.FU && p.color === color) return true;
+      }
+      return false;
+    }
+
+    function applyMoveToNewState(stateOrig, move, side) {
+      const st = cloneState(stateOrig);
+      const board = st.board;
+      const hands = st.hands;
+      const enemy = side === COLOR_BLACK ? COLOR_WHITE : COLOR_BLACK;
+
+      let fromPos = null;
+      let toPos = { r: move.toR, c: move.toC };
+      let capturedBaseType = null;
+
+      if (move.kind === "move") {
+        const piece = board[move.fromR][move.fromC];
+        if (!piece) {
+          return st;
+        }
+        const target = board[move.toR][move.toC];
+        if (target && target.color === enemy) {
+          const baseType = DEMOTION_MAP[target.type] || target.type;
+          if (baseType !== PT.OU) {
+            hands[side].push(baseType);
+            capturedBaseType = baseType;
+          }
+        }
+        board[move.fromR][move.fromC] = null;
+        const newType =
+          move.promote && PROMOTION_MAP[piece.type]
+            ? PROMOTION_MAP[piece.type]
+            : piece.type;
+        board[move.toR][move.toC] = { type: newType, color: side };
+        fromPos = { r: move.fromR, c: move.fromC };
+      } else if (move.kind === "drop") {
+        const idx = hands[side].indexOf(move.dropType);
+        if (idx >= 0) {
+          hands[side].splice(idx, 1);
+        }
+        board[move.toR][move.toC] = { type: move.dropType, color: side };
+      }
+
+      st.turn = enemy;
+      st.lastMove = { from: fromPos, to: toPos, captured: capturedBaseType };
+      return st;
+    }
+
+    function isLegalMoveWrapper(stateOrig, side, move, options = {}) {
+      const { suppressAlerts = false, suppressPawnDropMate = false } =
+        options;
+      const newState = applyMoveToNewState(stateOrig, move, side);
+
+      if (isInCheck(newState, side)) {
+        if (!suppressAlerts) {
+          alert("王手放置はできません。");
+        }
+        return { ok: false, newState: null };
+      }
+
+      if (
+        !suppressPawnDropMate &&
+        move.kind === "drop" &&
+        move.dropType === PT.FU
+      ) {
+        if (isPawnDropMate(stateOrig, newState, side)) {
+          if (!suppressAlerts) {
+            alert("打ち歩詰めは反則です。");
+          }
+          return { ok: false, newState: null };
+        }
+      }
+
+      return { ok: true, newState };
+    }
+
+    function isPawnDropMate(prevState, newState, side) {
+      const enemy = side === COLOR_BLACK ? COLOR_WHITE : COLOR_BLACK;
+      if (!isInCheck(newState, enemy)) return false;
+      const hasMove = hasAnyLegalMove(newState, enemy, {
+        suppressPawnDropMate: true,
+      });
+      return !hasMove;
+    }
+
+    function hasAnyLegalMove(stateToCheck, side, options = {}) {
+      const { suppressPawnDropMate = false } = options;
+      const board = stateToCheck.board;
+      const hands = stateToCheck.hands;
+
+      // 盤上の駒の手
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          const p = board[r][c];
+          if (!p || p.color !== side) continue;
+          const dests = generateDestinationsForPiece(board, r, c);
+          for (const d of dests) {
+            const fromR = r;
+            const fromC = c;
+            const toR = d.r;
+            const toC = d.c;
+            const pieceType = p.type;
+            const promInfo = getPromotionInfo(pieceType, side, fromR, toR);
+            if (promInfo.mustPromote) {
+              const move = {
+                kind: "move",
+                fromR,
+                fromC,
+                toR,
+                toC,
+                pieceType,
+                promote: true,
+              };
+              const res = isLegalMoveWrapper(
+                stateToCheck,
+                side,
+                move,
+                {
+                  suppressAlerts: true,
+                  suppressPawnDropMate,
+                }
+              );
+              if (res.ok) return true;
+            } else if (promInfo.canPromote) {
+              let move = {
+                kind: "move",
+                fromR,
+                fromC,
+                toR,
+                toC,
+                pieceType,
+                promote: false,
+              };
+              let res = isLegalMoveWrapper(stateToCheck, side, move, {
+                suppressAlerts: true,
+                suppressPawnDropMate,
+              });
+              if (res.ok) return true;
+              move = {
+                kind: "move",
+                fromR,
+                fromC,
+                toR,
+                toC,
+                pieceType,
+                promote: true,
+              };
+              res = isLegalMoveWrapper(stateToCheck, side, move, {
+                suppressAlerts: true,
+                suppressPawnDropMate,
+              });
+              if (res.ok) return true;
+            } else {
+              const move = {
+                kind: "move",
+                fromR,
+                fromC,
+                toR,
+                toC,
+                pieceType,
+                promote: false,
+              };
+              const res = isLegalMoveWrapper(
+                stateToCheck,
+                side,
+                move,
+                {
+                  suppressAlerts: true,
+                  suppressPawnDropMate,
+                }
+              );
+              if (res.ok) return true;
+            }
+          }
+        }
+      }
+
+      // 持ち駒の打ち
+      const types = Object.values(PT);
+      for (const type of types) {
+        const cnt = countPieces(hands[side], type);
+        if (cnt <= 0) continue;
+        for (let r = 0; r < 9; r++) {
+          if (isIllegalDropSquareForPieceType(type, side, r)) continue;
+          for (let c = 0; c < 9; c++) {
+            if (board[r][c]) continue;
+            if (type === PT.FU && hasPawnInFile(board, side, c)) {
+              continue;
+            }
+            const move = {
+              kind: "drop",
+              toR: r,
+              toC: c,
+              dropType: type,
+            };
+            const res = isLegalMoveWrapper(
+              stateToCheck,
+              side,
+              move,
+              {
+                suppressAlerts: true,
+                suppressPawnDropMate,
+              }
+            );
+            if (res.ok) return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function getPromotionInfo(pieceType, color, fromR, toR) {
+      if (!PROMOTABLE.has(pieceType)) {
+        return { canPromote: false, mustPromote: false };
+      }
+      const can =
+        isPromotionZone(color, fromR) || isPromotionZone(color, toR);
+
+      let must = false;
+      if (pieceType === PT.FU || pieceType === PT.KY) {
+        // 先手は 0 段目、後手は 8 段目に行くと強制成り
+        if (color === COLOR_BLACK && toR === 0) must = true;
+        if (color === COLOR_WHITE && toR === 8) must = true;
+      } else if (pieceType === PT.KE) {
+        // 先手は 0,1 段目、後手は 7,8 段目に行くと強制成り
+        if (color === COLOR_BLACK && toR <= 1) must = true;
+        if (color === COLOR_WHITE && toR >= 7) must = true;
+      }
+      return { canPromote: can, mustPromote: must };
+    }
+
+    /**********************
+     * 入力処理・選択管理 *
+     **********************/
+
+    function clearSelection() {
+      selected = null;
+      currentLegalTargets = [];
+      render();
+    }
+
+    function tryUserMove(move) {
+      const res = isLegalMoveWrapper(state, state.turn, move, {
+        suppressAlerts: false,
+        suppressPawnDropMate: false,
+      });
+      if (!res.ok) return;
+
+      // 履歴保存
+      history.push(cloneState(state));
+      // 状態更新
+      state = res.newState;
+
+      // 選択解除して盤面を先に更新（「直後」に詰み表示）
+      selected = null;
+      currentLegalTargets = [];
+      render();
+
+      const enemy = state.turn;
+      const enemyInCheck = isInCheck(state, enemy);
+      const enemyHasMove = hasAnyLegalMove(state, enemy, {
+        suppressPawnDropMate: false,
+      });
+      if (enemyInCheck && !enemyHasMove) {
+        const winner = enemy === COLOR_BLACK ? "後手" : "先手";
+        alert(`詰みです。${winner}の勝ちです。`);
+      }
+    }
+
+    function selectBoardPiece(r, c) {
+      const piece = state.board[r][c];
+      if (!piece) {
+        clearSelection();
+        return;
+      }
+      if (piece.color !== state.turn) {
+        clearSelection();
+        return;
+      }
+
+      // 同じ駒をもう一度クリックしたら選択解除
+      if (
+        selected &&
+        selected.kind === "board" &&
+        selected.r === r &&
+        selected.c === c
+      ) {
+        clearSelection();
+        return;
+      }
+
+      selected = { kind: "board", r, c, piece };
+      const dests = generateDestinationsForPiece(state.board, r, c);
+      currentLegalTargets = dests.map((d) => ({
+        r: d.r,
+        c: d.c,
+        sourcePiece: piece,
+        fromR: r,
+        fromC: c,
+        kind: "move",
+      }));
+      render();
+    }
+
+    function selectHandPiece(color, type) {
+      if (color !== state.turn) {
+        clearSelection();
+        return;
+      }
+      const cnt = countPieces(state.hands[color], type);
+      if (cnt <= 0) {
+        clearSelection();
+        return;
+      }
+
+      // 同じ持ち駒を再クリックで選択解除
+      if (
+        selected &&
+        selected.kind === "hand" &&
+        selected.color === color &&
+        selected.type === type
+      ) {
+        clearSelection();
+        return;
+      }
+
+      selected = { kind: "hand", color, type };
+      currentLegalTargets = [];
+      for (let r = 0; r < 9; r++) {
+        if (isIllegalDropSquareForPieceType(type, color, r)) continue;
+        for (let c = 0; c < 9; c++) {
+          if (state.board[r][c]) continue;
+          if (type === PT.FU && hasPawnInFile(state.board, color, c)) {
+            continue;
+          }
+          currentLegalTargets.push({
+            r,
+            c,
+            pieceType: type,
+            kind: "drop",
+            sourcePiece: { type, color },
+          });
+        }
+      }
+      render();
+    }
+
+    // 盤クリック
+    boardEl.addEventListener("pointerdown", (ev) => {
+      if (isPromotionDialogOpen) return; // 成りダイアログ表示中は入力無効
+
+      const cellEl = ev.target.closest(".cell");
+      if (!cellEl) return;
+      const r = parseInt(cellEl.dataset.r, 10);
+      const c = parseInt(cellEl.dataset.c, 10);
+
+      const pieceEl = cellEl.querySelector(".piece");
+
+      // 選択済み → まず合法手として移動を試す
+      if (selected) {
+        const candidate = currentLegalTargets.find(
+          (t) => t.r === r && t.c === c
+        );
+        if (candidate) {
+          if (candidate.kind === "move" && selected.kind === "board") {
+            const fromR = selected.r;
+            const fromC = selected.c;
+            const toR = r;
+            const toC = c;
+            const pieceType = selected.piece.type;
+            const promInfo = getPromotionInfo(
+              pieceType,
+              state.turn,
+              fromR,
+              toR
+            );
+
+            if (promInfo.mustPromote) {
+              const move = {
+                kind: "move",
+                fromR,
+                fromC,
+                toR,
+                toC,
+                pieceType,
+                promote: true,
+              };
+              tryUserMove(move);
+              return;
+            } else if (promInfo.canPromote) {
+              const baseMove = {
+                kind: "move",
+                fromR,
+                fromC,
+                toR,
+                toC,
+                pieceType,
+              };
+              openPromotionDialog((promote) => {
+                const move = { ...baseMove, promote };
+                tryUserMove(move);
+              });
+              return;
+            } else {
+              const move = {
+                kind: "move",
+                fromR,
+                fromC,
+                toR,
+                toC,
+                pieceType,
+                promote: false,
+              };
+              tryUserMove(move);
+              return;
+            }
+          } else if (
+            candidate.kind === "drop" &&
+            selected.kind === "hand"
+          ) {
+            const move = {
+              kind: "drop",
+              toR: r,
+              toC: c,
+              dropType: selected.type,
+            };
+            tryUserMove(move);
+            return;
+          }
+        }
+
+        // 合法手でないマスクリック → 選択解除 or 再選択
+        if (!pieceEl) {
+          clearSelection();
+          return;
+        }
+        if (pieceEl.dataset.r !== undefined) {
+          const rr = parseInt(pieceEl.dataset.r, 10);
+          const cc = parseInt(pieceEl.dataset.c, 10);
+          selectBoardPiece(rr, cc);
+          return;
+        }
+        clearSelection();
+        return;
+      }
+
+      // 何も選択していない状態：駒があればそれを選択
+      if (pieceEl && pieceEl.dataset.r !== undefined) {
+        const rr = parseInt(pieceEl.dataset.r, 10);
+        const cc = parseInt(pieceEl.dataset.c, 10);
+        selectBoardPiece(rr, cc);
+        return;
+      }
+
+      // 何もないマスをクリック → 何もしない / 選択解除
+      clearSelection();
+    });
+
+    function setupHandClick(el, color) {
+      el.addEventListener("pointerdown", (ev) => {
+        if (isPromotionDialogOpen) return; // 成りダイアログ中は無効
+        const wrap = ev.target.closest(".hand-piece-wrapper");
+        if (!wrap) return;
+        const type = wrap.dataset.type;
+        selectHandPiece(color, type);
+      });
+    }
+
+    setupHandClick(blackHandEl, COLOR_BLACK);
+    setupHandClick(whiteHandEl, COLOR_WHITE);
+
+    /****************
+     * ボタン操作等 *
+     ****************/
+
+    document
+      .getElementById("newGameBtn")
+      .addEventListener("click", () => {
+        if (isPromotionDialogOpen) return;
+        if (
+          confirm("現在の対局を破棄して新規対局を開始しますか？")
+        ) {
+          state = createInitialState();
+          history = [];
+          selected = null;
+          currentLegalTargets = [];
+          render();
+        }
+      });
+
+    document.getElementById("undoBtn").addEventListener("click", () => {
+      if (isPromotionDialogOpen) return;
+      if (history.length === 0) return;
+      state = history.pop();
+      selected = null;
+      currentLegalTargets = [];
+      render();
+    });
+
+    /***********************
+     * 駒デザイン切り替え  *
+     ***********************/
+
+    const designBtn = document.getElementById("designBtn");
+    const designInput = document.getElementById("designInput");
+
+    const CUSTOM_PIECE_FILEMAP = {
+      [PT.FU]: "fu.png",
+      [PT.KY]: "ky.png",
+      [PT.KE]: "ke.png",
+      [PT.GI]: "gi.png",
+      [PT.KI]: "ki.png",
+      [PT.KA]: "ka.png",
+      [PT.HI]: "hi.png",
+      [PT.OU]: "ou.png",
+      [PT.TO]: "to.png",
+      [PT.NY]: "ny.png",
+      [PT.NK]: "nk.png",
+      [PT.NG]: "ng.png",
+      [PT.UM]: "um.png",
+      [PT.RY]: "ry.png",
+    };
+
+    designBtn.addEventListener("click", () => {
+      if (isPromotionDialogOpen) return;
+      designInput.click();
+    });
+
+    designInput.addEventListener("change", (ev) => {
+      const files = Array.from(ev.target.files || []);
+      if (files.length === 0) return;
+      try {
+        const lowerMap = {};
+        for (const f of files) {
+          lowerMap[f.name.toLowerCase()] = f;
+        }
+        const newImages = {};
+        for (const [type, fname] of Object.entries(
+          CUSTOM_PIECE_FILEMAP
+        )) {
+          const f = lowerMap[fname.toLowerCase()];
+          if (f) {
+            const url = URL.createObjectURL(f);
+            newImages[type] = url;
+          }
+        }
+        for (const key of Object.keys(customPieceImages)) {
+          URL.revokeObjectURL(customPieceImages[key]);
+          delete customPieceImages[key];
+        }
+        for (const [t, url] of Object.entries(newImages)) {
+          customPieceImages[t] = url;
+        }
+        render();
+      } catch (e) {
+        alert(
+          "駒デザインの読み込みに失敗しました。デフォルトデザインを使用します。"
+        );
+      } finally {
+        designInput.value = "";
+      }
+    });
+
+    // DOM 準備後に初期描画
+    window.addEventListener("DOMContentLoaded", () => {
+      render();
+    });
+  </script>
+</body>
+</html>
