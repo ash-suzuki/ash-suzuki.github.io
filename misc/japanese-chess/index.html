@@ -150,7 +150,12 @@
       background: #fff9c4;
     }
 
-    /* 手番側の駒マス（非選択時）をわずかに明るく */
+    /* 合法手マスの背景（通常よりごく僅かに暗く） */
+    .cell.legal-target {
+      background: #e5cf9e;
+    }
+
+    /* 手番側の駒マス（非選択時）を少し明るく */
     .cell.turn-cell {
       background: var(--turn-cell-bg);
     }
@@ -324,9 +329,154 @@
       border-radius: 8px;
     }
 
+    /* 持ち駒選択時：駒台マス全体の矩形枠でハイライト */
+    .hand-piece-wrapper.hand-selected {
+      box-shadow: 0 0 0 3px rgba(255, 255, 0, 0.9) inset;
+    }
+
     /* カスタム画像を使う場合、テキストは非表示にする */
     .piece.custom-image .piece-body {
       display: none;
+    }
+
+    /* ---- 駒の動きを示すマーカー ---- */
+    .move-marker {
+      position: absolute;
+      pointer-events: none;
+      opacity: 0.5; /* 透明度 50% */
+    }
+
+    /* 1マスだけ動ける方向：小さい丸（少し小さく） */
+    .move-marker-step {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: #555;
+    }
+
+    /* 何マスでも滑れる方向：小さめ二等辺三角形 */
+    .move-marker-slide {
+      width: 0;
+      height: 0;
+      border-style: solid;
+    }
+
+    /* 位置（8方向） */
+    .marker-up {
+      top: 6%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .marker-down {
+      bottom: 6%;
+      left: 50%;
+      transform: translate(-50%, 50%);
+    }
+    .marker-left {
+      left: 6%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .marker-right {
+      right: 6%;
+      top: 50%;
+      transform: translate(50%, -50%);
+    }
+    .marker-up-left {
+      top: 6%;
+      left: 6%;
+      transform: translate(-50%, -50%) rotate(-45deg);
+    }
+    .marker-up-right {
+      top: 6%;
+      right: 6%;
+      transform: translate(50%, -50%) rotate(45deg);
+    }
+    .marker-down-left {
+      bottom: 6%;
+      left: 6%;
+      transform: translate(-50%, 50%) rotate(-135deg);
+    }
+    .marker-down-right {
+      bottom: 6%;
+      right: 6%;
+      transform: translate(50%, 50%) rotate(135deg);
+    }
+
+    /* 三角形（滑走方向） - 暗めの灰色 (#555)・底辺短め */
+    .move-marker-slide.marker-up {
+      border-width: 0 3px 5px 3px;
+      border-color: transparent transparent #555 transparent;
+    }
+    .move-marker-slide.marker-down {
+      border-width: 5px 3px 0 3px;
+      border-color: #555 transparent transparent transparent;
+    }
+    .move-marker-slide.marker-left {
+      border-width: 3px 5px 3px 0;
+      border-color: transparent #555 transparent transparent;
+    }
+    .move-marker-slide.marker-right {
+      border-width: 3px 0 3px 5px;
+      border-color: transparent transparent transparent #555;
+    }
+    .move-marker-slide.marker-up-left,
+    .move-marker-slide.marker-up-right,
+    .move-marker-slide.marker-down-left,
+    .move-marker-slide.marker-down-right {
+      border-width: 0 3px 5px 3px;
+      border-color: transparent transparent #555 transparent;
+    }
+
+    /* 桂馬用マーカー：キャレット(^)型  */
+    .move-marker-knight {
+      position: absolute;
+      width: 8px;
+      height: 4px;
+      pointer-events: none;
+    }
+    .move-marker-knight::before,
+    .move-marker-knight::after {
+      content: "";
+      position: absolute;
+      bottom: 0;
+      width: 50%;
+      height: 2px;
+      background: #555;
+    }
+    .move-marker-knight::before {
+      left: 0;
+      transform-origin: right bottom;
+      transform: rotate(35deg);
+    }
+    .move-marker-knight::after {
+      right: 0;
+      transform-origin: left bottom;
+      transform: rotate(-35deg);
+    }
+
+    /* 先手桂馬：前方は上側（上辺・デザイン上下逆） */
+    .marker-knight-black-left {
+      top: 6%;
+      left: 33%;
+      transform: translate(-50%, -50%) rotate(180deg);
+    }
+    .marker-knight-black-right {
+      top: 6%;
+      left: 66%;
+      transform: translate(-50%, -50%) rotate(180deg);
+    }
+
+    /* 後手桂馬：上辺のまま（位置は上辺・デザインはそのまま） */
+    .marker-knight-white-left {
+      top: 6%;
+      left: 33%;
+      transform: translate(-50%, -50%);
+    }
+    .marker-knight-white-right {
+      top: 6%;
+      left: 66%;
+      transform: translate(-50%, -50%);
     }
 
     /* 成り確認ダイアログ */
@@ -371,6 +521,61 @@
     }
 
     #promoteNo {
+      background: #9e9e9e;
+      color: #fff;
+    }
+
+    /* 汎用情報ダイアログ（アラームでないポップアップ） */
+    #infoOverlay,
+    #confirmOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1100;
+    }
+
+    #infoDialog,
+    #confirmDialog {
+      background: #ffffff;
+      padding: 16px;
+      border-radius: 8px;
+      max-width: 260px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      font-size: 0.9rem;
+    }
+
+    #infoDialogButtons,
+    #confirmDialogButtons {
+      margin-top: 12px;
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+    }
+
+    #infoDialogButtons button,
+    #confirmDialogButtons button {
+      padding: 6px 16px;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+
+    #infoOk {
+      background: #1976d2;
+      color: #fff;
+    }
+
+    #confirmYes {
+      background: #1976d2;
+      color: #fff;
+    }
+
+    #confirmNo {
       background: #9e9e9e;
       color: #fff;
     }
@@ -423,6 +628,27 @@
       <div id="promoteDialogButtons">
         <button id="promoteYes">Yes</button>
         <button id="promoteNo">No</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 情報ダイアログ（OK のみ） -->
+  <div id="infoOverlay">
+    <div id="infoDialog">
+      <div id="infoMessage"></div>
+      <div id="infoDialogButtons">
+        <button id="infoOk">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 確認ダイアログ（Yes/No） -->
+  <div id="confirmOverlay">
+    <div id="confirmDialog">
+      <div id="confirmMessage"></div>
+      <div id="confirmDialogButtons">
+        <button id="confirmYes">Yes</button>
+        <button id="confirmNo">No</button>
       </div>
     </div>
   </div>
@@ -713,6 +939,72 @@
       }
     });
 
+    // 汎用情報ダイアログ（alert 代替）
+    const infoOverlayEl = document.getElementById("infoOverlay");
+    const infoMessageEl = document.getElementById("infoMessage");
+    const infoOkBtn = document.getElementById("infoOk");
+    let isInfoDialogOpen = false;
+
+    function openInfoDialog(message) {
+      infoMessageEl.textContent = message;
+      isInfoDialogOpen = true;
+      infoOverlayEl.style.display = "flex";
+    }
+
+    function closeInfoDialog() {
+      isInfoDialogOpen = false;
+      infoOverlayEl.style.display = "none";
+    }
+
+    infoOkBtn.addEventListener("click", () => {
+      closeInfoDialog();
+    });
+
+    // 汎用確認ダイアログ（confirm 代替）
+    const confirmOverlayEl = document.getElementById("confirmOverlay");
+    const confirmMessageEl = document.getElementById("confirmMessage");
+    const confirmYesBtn = document.getElementById("confirmYes");
+    const confirmNoBtn = document.getElementById("confirmNo");
+    let confirmDialogHandler = null;
+    let isConfirmDialogOpen = false;
+
+    function openConfirmDialog(message, onChoice) {
+      confirmMessageEl.textContent = message;
+      confirmDialogHandler = onChoice;
+      isConfirmDialogOpen = true;
+      confirmOverlayEl.style.display = "flex";
+    }
+
+    function closeConfirmDialog() {
+      isConfirmDialogOpen = false;
+      confirmOverlayEl.style.display = "none";
+      confirmDialogHandler = null;
+    }
+
+    confirmYesBtn.addEventListener("click", () => {
+      if (confirmDialogHandler) {
+        const fn = confirmDialogHandler;
+        closeConfirmDialog();
+        fn(true);
+      } else {
+        closeConfirmDialog();
+      }
+    });
+
+    confirmNoBtn.addEventListener("click", () => {
+      if (confirmDialogHandler) {
+        const fn = confirmDialogHandler;
+        closeConfirmDialog();
+        fn(false);
+      } else {
+        closeConfirmDialog();
+      }
+    });
+
+    function isAnyDialogOpen() {
+      return isPromotionDialogOpen || isInfoDialogOpen || isConfirmDialogOpen;
+    }
+
     /*********************
      * 盤・駒の描画関連   *
      *********************/
@@ -780,6 +1072,108 @@
       return div;
     }
 
+    // dr,dc を 8方向の文字列に変換
+    function directionFromDelta(dr, dc) {
+      if (dr === -1 && dc === 0) return "up";
+      if (dr === 1 && dc === 0) return "down";
+      if (dr === 0 && dc === -1) return "left";
+      if (dr === 0 && dc === 1) return "right";
+      if (dr === -1 && dc === -1) return "up-left";
+      if (dr === -1 && dc === 1) return "up-right";
+      if (dr === 1 && dc === -1) return "down-left";
+      if (dr === 1 && dc === 1) return "down-right";
+      return null; // 桂馬など
+    }
+
+    // 駒ごとの方向能力（8方向 or 桂馬）
+    function getDirectionalInfo(piece) {
+      // 桂馬（未成）は特別扱い
+      if (piece.type === PT.KE) {
+        return { isKnight: true, dirs: null };
+      }
+
+      const def = PIECE_MOVES[piece.type];
+      const dirs = {
+        "up": null,
+        "down": null,
+        "left": null,
+        "right": null,
+        "up-left": null,
+        "up-right": null,
+        "down-left": null,
+        "down-right": null,
+      };
+
+      if (!def) {
+        return { isKnight: false, dirs };
+      }
+
+      const dirFactor = def.dir ? (piece.color === COLOR_BLACK ? -1 : 1) : 1;
+
+      if (def.steps) {
+        for (const s of def.steps) {
+          const dr = s.dr * dirFactor;
+          const dc = s.dc;
+          const dname = directionFromDelta(dr, dc);
+          if (!dname) continue;
+          if (!dirs[dname]) {
+            dirs[dname] = "step";
+          }
+        }
+      }
+
+      if (def.slides) {
+        for (const s of def.slides) {
+          const dr = s.dr * dirFactor;
+          const dc = s.dc;
+          const dname = directionFromDelta(dr, dc);
+          if (!dname) continue;
+          // 無制限スライドを優先
+          dirs[dname] = "slide";
+        }
+      }
+
+      return { isKnight: false, dirs };
+    }
+
+    // マス（または駒台マス）に、駒の動きを表すマーカーを追加
+    function appendMoveMarkers(container, piece) {
+      const info = getDirectionalInfo(piece);
+
+      if (info.isKnight) {
+        const forwardIsUp = piece.color === COLOR_BLACK;
+        const clsLeft = forwardIsUp
+          ? "marker-knight-black-left"
+          : "marker-knight-white-left";
+        const clsRight = forwardIsUp
+          ? "marker-knight-black-right"
+          : "marker-knight-white-right";
+
+        const m1 = document.createElement("div");
+        m1.className = "move-marker move-marker-knight " + clsLeft;
+        container.appendChild(m1);
+
+        const m2 = document.createElement("div");
+        m2.className = "move-marker move-marker-knight " + clsRight;
+        container.appendChild(m2);
+        return;
+      }
+
+      const dirs = info.dirs;
+      for (const [dir, kind] of Object.entries(dirs)) {
+        if (!kind) continue;
+        const m = document.createElement("div");
+        m.classList.add("move-marker");
+        m.classList.add("marker-" + dir.replace("-", "-"));
+        if (kind === "step") {
+          m.classList.add("move-marker-step");
+        } else if (kind === "slide") {
+          m.classList.add("move-marker-slide");
+        }
+        container.appendChild(m);
+      }
+    }
+
     function isLastMoveCell(r, c) {
       const lm = state.lastMove;
       if (!lm) return false;
@@ -800,17 +1194,23 @@
 
           const piece = state.board[r][c];
 
+          // 合法手マスかどうか（選択中のみ）
+          const isLegalTarget =
+            selected &&
+            currentLegalTargets.some((t) => t.r === r && t.c === c);
+
           if (isLastMoveCell(r, c)) {
             cell.classList.add("last-move");
           }
 
           // 何も選択していないとき、手番側の駒マスを少し明るく
-          if (
-            !selected &&
-            piece &&
-            piece.color === state.turn
-          ) {
+          if (!selected && piece && piece.color === state.turn) {
             cell.classList.add("turn-cell");
+          }
+
+          // 合法手マスの背景強調
+          if (isLegalTarget) {
+            cell.classList.add("legal-target");
           }
 
           // 選択中マスの背景強調
@@ -832,13 +1232,16 @@
             pieceEl.dataset.r = String(r);
             pieceEl.dataset.c = String(c);
             inner.appendChild(pieceEl);
+
+            // 盤上駒の動きマーカー
+            appendMoveMarkers(cell, piece);
           }
 
           boardEl.appendChild(cell);
         }
       }
 
-      // 合法手ハイライト描画
+      // 合法手ハイライト描画（半透明駒）
       currentLegalTargets.forEach((t) => {
         const r = t.r;
         const c = t.c;
@@ -896,14 +1299,14 @@
           const pieceEl = createPieceElement({ type, color }, false);
           pieceEl.classList.add("hand-piece");
 
-          // 持ち駒選択中の強調（ここは駒側でOK）
+          // 持ち駒選択中：駒台マス（wrap）を矩形枠で強調
           if (
             selected &&
             selected.kind === "hand" &&
             selected.color === color &&
             selected.type === type
           ) {
-            pieceEl.style.boxShadow = "0 0 0 3px rgba(255,255,0,0.9) inset";
+            wrap.classList.add("hand-selected");
           }
 
           wrap.appendChild(pieceEl);
@@ -912,6 +1315,9 @@
           countEl.classList.add("hand-count");
           countEl.textContent = String(cnt);
           wrap.appendChild(countEl);
+
+          // 持ち駒の動きマーカー
+          appendMoveMarkers(wrap, { type, color });
 
           handEl.appendChild(wrap);
         });
@@ -1082,13 +1488,12 @@
     }
 
     function isLegalMoveWrapper(stateOrig, side, move, options = {}) {
-      const { suppressAlerts = false, suppressPawnDropMate = false } =
-        options;
+      const { suppressAlerts = false, suppressPawnDropMate = false } = options;
       const newState = applyMoveToNewState(stateOrig, move, side);
 
       if (isInCheck(newState, side)) {
         if (!suppressAlerts) {
-          alert("王手放置はできません。");
+          openInfoDialog("王将が取られてしまう手は禁止です");
         }
         return { ok: false, newState: null };
       }
@@ -1100,7 +1505,7 @@
       ) {
         if (isPawnDropMate(stateOrig, newState, side)) {
           if (!suppressAlerts) {
-            alert("打ち歩詰めは反則です。");
+            openInfoDialog("打ち歩詰めは反則です。");
           }
           return { ok: false, newState: null };
         }
@@ -1146,15 +1551,10 @@
                 pieceType,
                 promote: true,
               };
-              const res = isLegalMoveWrapper(
-                stateToCheck,
-                side,
-                move,
-                {
-                  suppressAlerts: true,
-                  suppressPawnDropMate,
-                }
-              );
+              const res = isLegalMoveWrapper(stateToCheck, side, move, {
+                suppressAlerts: true,
+                suppressPawnDropMate,
+              });
               if (res.ok) return true;
             } else if (promInfo.canPromote) {
               let move = {
@@ -1195,15 +1595,10 @@
                 pieceType,
                 promote: false,
               };
-              const res = isLegalMoveWrapper(
-                stateToCheck,
-                side,
-                move,
-                {
-                  suppressAlerts: true,
-                  suppressPawnDropMate,
-                }
-              );
+              const res = isLegalMoveWrapper(stateToCheck, side, move, {
+                suppressAlerts: true,
+                suppressPawnDropMate,
+              });
               if (res.ok) return true;
             }
           }
@@ -1228,15 +1623,10 @@
               toC: c,
               dropType: type,
             };
-            const res = isLegalMoveWrapper(
-              stateToCheck,
-              side,
-              move,
-              {
-                suppressAlerts: true,
-                suppressPawnDropMate,
-              }
-            );
+            const res = isLegalMoveWrapper(stateToCheck, side, move, {
+              suppressAlerts: true,
+              suppressPawnDropMate,
+            });
             if (res.ok) return true;
           }
         }
@@ -1298,7 +1688,7 @@
       });
       if (enemyInCheck && !enemyHasMove) {
         const winner = enemy === COLOR_BLACK ? "後手" : "先手";
-        alert(`詰みです。${winner}の勝ちです。`);
+        openInfoDialog(`詰みです。${winner}の勝ちです。`);
       }
     }
 
@@ -1382,7 +1772,7 @@
 
     // 盤クリック
     boardEl.addEventListener("pointerdown", (ev) => {
-      if (isPromotionDialogOpen) return; // 成りダイアログ表示中は入力無効
+      if (isAnyDialogOpen()) return; // いずれかのダイアログ表示中は入力無効
 
       const cellEl = ev.target.closest(".cell");
       if (!cellEl) return;
@@ -1493,7 +1883,7 @@
 
     function setupHandClick(el, color) {
       el.addEventListener("pointerdown", (ev) => {
-        if (isPromotionDialogOpen) return; // 成りダイアログ中は無効
+        if (isAnyDialogOpen()) return; // ダイアログ中は無効
         const wrap = ev.target.closest(".hand-piece-wrapper");
         if (!wrap) return;
         const type = wrap.dataset.type;
@@ -1511,20 +1901,23 @@
     document
       .getElementById("newGameBtn")
       .addEventListener("click", () => {
-        if (isPromotionDialogOpen) return;
-        if (
-          confirm("現在の対局を破棄して新規対局を開始しますか？")
-        ) {
-          state = createInitialState();
-          history = [];
-          selected = null;
-          currentLegalTargets = [];
-          render();
-        }
+        if (isAnyDialogOpen()) return;
+        openConfirmDialog(
+          "現在の対局を破棄して新規対局を開始しますか？",
+          (yes) => {
+            if (yes) {
+              state = createInitialState();
+              history = [];
+              selected = null;
+              currentLegalTargets = [];
+              render();
+            }
+          }
+        );
       });
 
     document.getElementById("undoBtn").addEventListener("click", () => {
-      if (isPromotionDialogOpen) return;
+      if (isAnyDialogOpen()) return;
       if (history.length === 0) return;
       state = history.pop();
       selected = null;
@@ -1557,7 +1950,7 @@
     };
 
     designBtn.addEventListener("click", () => {
-      if (isPromotionDialogOpen) return;
+      if (isAnyDialogOpen()) return;
       designInput.click();
     });
 
@@ -1588,7 +1981,7 @@
         }
         render();
       } catch (e) {
-        alert(
+        openInfoDialog(
           "駒デザインの読み込みに失敗しました。デフォルトデザインを使用します。"
         );
       } finally {
