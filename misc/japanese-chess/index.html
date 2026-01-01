@@ -455,7 +455,7 @@
       transform: rotate(-35deg);
     }
 
-    /* 先手桂馬：前方は上側（上辺・デザイン上下逆） */
+    /* 先手桂馬：前方は上側（位置は前方のまま・向きだけ反転） */
     .marker-knight-black-left {
       top: 6%;
       left: 33%;
@@ -467,16 +467,16 @@
       transform: translate(-50%, -50%) rotate(180deg);
     }
 
-    /* 後手桂馬：上辺のまま（位置は上辺・デザインはそのまま） */
+    /* 後手桂馬：前方は下側（位置は前方のまま・向きだけ反転） */
     .marker-knight-white-left {
-      top: 6%;
+      bottom: 6%;
       left: 33%;
-      transform: translate(-50%, -50%);
+      transform: translate(-50%, 50%);
     }
     .marker-knight-white-right {
-      top: 6%;
+      bottom: 6%;
       left: 66%;
-      transform: translate(-50%, -50%);
+      transform: translate(-50%, 50%);
     }
 
     /* 成り確認ダイアログ */
