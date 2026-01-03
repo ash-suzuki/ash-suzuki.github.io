@@ -1,0 +1,2797 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>学習クイズアプリ（単一HTML版）</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
+
+  <!--
+    ============================================================
+    学習クイズアプリ（スマホ／タブレット縦長レイアウト）
+    ------------------------------------------------------------
+    ■ このファイルについて
+      - HTML １ファイルだけで動作するクイズアプリです。
+      - CSS / JavaScript はすべてこのファイル内に記述しています。
+      - 外部ファイルは mcq.csv（インポート問題）だけです。
+
+    ■ mcq.csv の読み込みについて
+      - JavaScript の fetch("mcq.csv") を使っています。
+      - ブラウザで index.html を「ダブルクリック」して file:// で開くと，
+        多くのブラウザではセキュリティのため mcq.csv の読み込みが禁止されます。
+      - そのため，
+
+          1) index.html と mcq.csv を同じフォルダに置く
+          2) そのフォルダでローカルサーバーを起動する
+             例:  python -m http.server 8000
+          3) ブラウザで http://localhost:8000/index.html をひらく
+
+        のように，HTTP で開いてください。
+
+    ■ 実装済みジャンル（要約）
+      [生成問題]
+        - 一桁の加法減法
+        - 二桁どうしの加法減法（筆算）
+        - 平面図形（図形 → 図形名 １つ選択）
+        - 立体図形（立体図形 → 図形名 １つ選択）
+        - 音名クイズ（ト音記号，アルファベット音名）
+
+      [mcq.csv（インポート）]
+        - 漢字の読み／漢字多肢選択／格助詞／助数詞／文脈からの単語
+        - 色／混色／一般知識 など。
+
+    ■ 図形描画
+      - 平面図形：PLANE_SHAPE_TYPES に定義した情報から
+        drawPlaneShapeGeneric() で統一的に描画します。
+      - 立体図形：SOLID_SHAPE_TYPES に定義した情報から
+        drawSolidShapeGeneric() で統一的に描画します。
+        - プリズム・ピラミッドは共通ロジックで，
+          ・底面の正多角形
+          ・奥側にずらした正多角形
+          ・それらを結ぶ辺
+          を描画し，奥側（見えない辺）を「細い半透明の破線」で描きます。
+        - 球・円柱・円錐も同様に，見える線は太い実線，
+          見えない部分は細い半透明の破線で描画しています。
+
+      - 「図形 → 図形名 １つ選択」の立体図形問題では，
+        立方体（立方体は四角柱の下位カテゴリ）の場合に
+        「四角柱」を選択肢から除外するなど，
+        上位カテゴリを選択肢に含めないようにしています。
+
+    ■ mcq.csv が満たすべき主な仕様（抜粋）
+      - カラム：
+        genre, question_html, choices_html, score_multiplier
+      - choices_html の <li> 要素には，
+          data-correct="1"  … 正答
+          data-correct="0"  … 誤答
+        を必ず付けること。
+      - ふりがな：
+        * mcq.csv 内では，「ひらがなだけ」の語には <ruby> を振らない。
+        * 「漢字の読み」を問う問題では，
+          出題対象の漢字（「犬」など）には <ruby> を振らない。
+        * それ以外の漢字には，できるだけ <ruby> / <rt> でふりがなを付ける。
+      - 空欄（□・下線）のルール：
+        * その問題の全ての選択肢が 1 文字のときだけ，
+          文中の空欄に 「□」 を用いる。
+        * それ以外のときは，「＿＿」（二文字分の下線）を用いる。
+    ============================================================
+  -->
+
+  <style>
+    :root {
+      --app-max-width: 520px;
+      --app-bg: #f6f7ff;
+      --app-bg-deep: #e1e4ff;
+      --app-fg: #222;
+      --primary: #4a6dff;
+      --primary-soft: rgba(74, 109, 255, 0.1);
+      --accent-gold: #ffd700;
+      --accent-gold-soft: rgba(255, 215, 0, 0.5);
+      --danger: #c62828;
+      --danger-soft: rgba(198, 40, 40, 0.1);
+      --disabled: #bdbdbd;
+      --choice-border-radius: 12px;
+
+      --screen-fade-ms: 220ms;
+      --choice-flash-ms: 100ms;
+      --hint-blink-ms: 800ms;
+      --score-float-ms: 900ms;
+
+      --timer-height: 6px;
+
+      --font-size-base: 18px;
+      --font-size-large: 22px;
+      --font-size-title: 26px;
+      --font-size-huge: 36px;
+      --line-height-ruby: 1.8;
+      --font-family: "UD Digi Kyokasho N";
+
+      /* 問題文・選択肢で優先的に使うフォント */
+      --quiz-font-family:
+        "Helvetica Neue",
+        Arial,
+        "Hiragino Kaku Gothic ProN",
+        "Hiragino Sans",
+        Meiryo,
+        sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--app-bg);
+      color: var(--app-fg);
+      font-size: var(--font-size-base);
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: stretch;
+      font-family: var(--quiz-font-family);
+    }
+
+    .app-root {
+      width: 100%;
+      max-width: var(--app-max-width);
+      min-height: 100vh;
+      background: linear-gradient(to bottom, #ffffff, var(--app-bg));
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: visible;
+    }
+
+    .app-bar {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 12px;
+      background: #ffffff;
+      border-bottom: 1px solid #d0d4ff;
+      flex-shrink: 0;
+    }
+
+    .app-bar-title {
+      font-size: 20px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .app-bar-button-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .icon-button {
+      border: none;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 14px;
+      background: #eef0ff;
+      color: #344;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      transition: background var(--screen-fade-ms) ease, transform 80ms ease;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .icon-button:active {
+      transform: scale(0.96);
+      background: #dde0ff;
+    }
+
+    .screen {
+      flex: 1 0 auto;
+      padding: 12px;
+      display: none !important;
+      animation: screen-fade var(--screen-fade-ms) ease;
+    }
+    .screen.active {
+      display: block !important;
+    }
+
+    @keyframes screen-fade {
+      from {
+        opacity: 0;
+        transform: translateY(8px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .title-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: space-between;
+      padding-top: 24px;
+      padding-bottom: 24px;
+    }
+
+    .title-center {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .start-button {
+      padding: 16px 32px;
+      border-radius: 999px;
+      border: none;
+      background: linear-gradient(135deg, #ffb74d, #ff7043);
+      color: #fff;
+      font-size: 22px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.18);
+      transition: transform 80ms ease, box-shadow 80ms ease;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .start-button:active {
+      transform: translateY(2px);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+
+    .daily-score-box {
+      text-align: center;
+      margin-top: 8px;
+      padding: 8px 12px;
+      border-radius: 12px;
+      background: #ffffff;
+      border: 1px solid #d0d4ff;
+      font-size: 14px;
+      line-height: var(--line-height-ruby);
+    }
+
+    .daily-score-number {
+      font-size: 24px;
+      font-weight: bold;
+      color: #f57c00;
+    }
+
+    .title-footer {
+      margin-top: 16px;
+      font-size: 12px;
+      text-align: center;
+      color: #666;
+      line-height: var(--line-height-ruby);
+    }
+
+    .warning-box {
+      margin-bottom: 8px;
+      padding: 8px;
+      border-radius: 10px;
+      background: #fff3cd;
+      border: 1px solid #ffecb5;
+      font-size: 13px;
+      line-height: var(--line-height-ruby);
+    }
+
+    .settings-screen {
+      display: block;
+      padding-bottom: 24px;
+    }
+
+    .settings-section {
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 12px 14px;
+      border: 1px solid #d0d4ff;
+      box-shadow: 0 2px 4px rgba(0,0,60,0.04);
+      margin-bottom: 12px;
+    }
+
+    .settings-section-title {
+      font-weight: bold;
+      font-size: 15px;
+      margin-bottom: 8px;
+      line-height: var(--line-height-ruby);
+    }
+
+    .settings-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 6px 0;
+    }
+
+    .settings-row label {
+      font-size: 14px;
+      line-height: var(--line-height-ruby);
+      flex: 1;
+    }
+
+    .sec-input {
+      width: 96px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid #c5cae9;
+      text-align: right;
+      font-size: 16px;
+    }
+
+    .suffix {
+      margin-left: 4px;
+      font-size: 13px;
+    }
+
+    .toggle {
+      position: relative;
+      width: 46px;
+      height: 26px;
+      border-radius: 999px;
+      background: #e0e0e0;
+      flex-shrink: 0;
+      cursor: pointer;
+      transition: background 160ms ease;
+    }
+    .toggle::before {
+      content: "";
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #ffffff;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.25);
+      transition: transform 160ms ease;
+    }
+    .toggle.on {
+      background: #c5cae9;
+    }
+    .toggle.on::before {
+      transform: translateX(20px);
+    }
+
+    .settings-footer {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 8px;
+      gap: 8px;
+    }
+
+    .quiz-screen {
+      padding-bottom: 18px;
+      min-height: calc(100vh - 48px);
+    }
+
+    .timer-bar-wrapper {
+      height: var(--timer-height);
+      border-radius: 999px;
+      background: #e0e0f5;
+      overflow: hidden;
+      margin-top: 4px;
+      position: relative;
+    }
+
+    .timer-bar-inner {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 100%;
+      transform-origin: left center;
+      background: linear-gradient(to right, #66bb6a, #ffb300);
+      transition: transform 1s linear, background 200ms ease;
+    }
+
+    .timer-label {
+      margin-top: 4px;
+      text-align: right;
+      font-size: 13px;
+    }
+
+    .quiz-main {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .quiz-question-area {
+      border-radius: 16px;
+      background: #ffffff;
+      border: 1px solid #c5cae9;
+      padding: 10px;
+      line-height: var(--line-height-ruby);
+    }
+
+    .quiz-question-text {
+      font-size: var(--font-size-large);
+      font-family: var(--quiz-font-family);
+    }
+
+    .quiz-answer-area {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-bottom: 4px;
+      margin-top: 6px;
+    }
+
+    .choice-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .choice-button {
+      width: 100%;
+      border-radius: var(--choice-border-radius);
+      border: 1px solid #c5cae9;
+      background: #ffffff;
+      padding: 10px 12px;
+      font-size: var(--font-size-base);
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      position: relative;
+      overflow: hidden;
+      transition:
+        background 120ms ease,
+        transform 80ms ease,
+        box-shadow 120ms ease,
+        border-color 120ms ease,
+        color 120ms ease;
+      font-family: var(--quiz-font-family);
+    }
+    .choice-button span.choice-label {
+      flex: 1;
+      line-height: var(--line-height-ruby);
+    }
+    .choice-button:active {
+      transform: scale(0.98);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+    }
+    .choice-button.disabled {
+      background: #f0f0f0;
+      color: #888;
+      border-color: #e0e0e0;
+      cursor: default;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .choice-x-mark {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      opacity: 0;
+      font-size: 42px;
+      font-weight: bold;
+      color: rgba(0,0,0,0.65);
+      text-shadow: 0 0 6px rgba(0,0,0,0.7);
+    }
+    .choice-x-mark.visible {
+      opacity: 1;
+    }
+
+    @keyframes choice-flash {
+      0%   { box-shadow: 0 0 0 0 rgba(255,215,0,0); border-color: #c5cae9; }
+      50%  { box-shadow: 0 0 0 4px rgba(255,215,0,1); border-color: #ffc400; }
+      100% { box-shadow: 0 0 0 0 rgba(255,215,0,0); border-color: #ffc400; }
+    }
+    .choice-button.correct-flash {
+      animation: choice-flash var(--choice-flash-ms) ease-in-out 2;
+    }
+    .choice-button.correct-solid {
+      box-shadow: 0 0 0 4px rgba(255,215,0,0.9);
+      border-color: #ffca28;
+      background: #fff9e0;
+    }
+
+    .score-popup {
+      position: fixed;
+      left: 50%;
+      top: 60%;
+      transform: translate(-50%, -50%);
+      font-size: 28px;
+      font-weight: bold;
+      font-family: "Yu Gothic", "Meiryo", sans-serif;
+      background: linear-gradient(135deg, #fff59d, #ffca28);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      text-shadow: 0 0 6px rgba(255,255,255,0.8);
+      pointer-events: none;
+      opacity: 0;
+      z-index: 70;
+    }
+
+    @keyframes score-float {
+      0%   { transform: translate(-50%, 0); opacity: 0; }
+      15%  { opacity: 1; }
+      100% { transform: translate(-50%, -60px); opacity: 0; }
+    }
+    .score-popup.active {
+      animation: score-float var(--score-float-ms) ease-out forwards;
+    }
+
+    .correct-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 50;
+    }
+    .correct-overlay.active {
+      display: flex;
+    }
+    .correct-overlay::before {
+      content: "";
+      width: 80vmin;
+      height: 80vmin;
+      border-radius: 50%;
+      border: 14px solid rgba(255, 0, 0, 0.65);
+      box-shadow:
+        0 0 30px rgba(255, 0, 0, 0.7),
+        0 0 60px rgba(255, 0, 0, 0.4);
+      background: transparent;
+    }
+
+    .correct-message {
+      position: absolute;
+      max-width: 80vmin;
+      text-align: center;
+      font-size: 40px;
+      font-weight: bold;
+      color: rgba(255, 0, 0, 0.7);
+      pointer-events: none;
+      line-height: var(--line-height-ruby);
+    }
+
+    @keyframes correct-blink {
+      0% { opacity: 1; }
+      50% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    .correct-message.blink {
+      animation: correct-blink 1s ease-in-out infinite;
+    }
+
+    .next-tap-overlay {
+      position: fixed;
+      inset: 0;
+      display: none;
+      z-index: 60;
+      background: transparent;
+    }
+    .next-tap-overlay.active {
+      display: block;
+    }
+
+    .digit-question-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .vertical-expression {
+      font-size: 24px;
+      text-align: right;
+      display: inline-block;
+    }
+    .vertical-expression-row {
+      display: flex;
+      justify-content: flex-end;
+      align-items: baseline;
+    }
+    .vertical-expression-op {
+      width: 1.4em;
+      text-align: center;
+    }
+    .vertical-expression-num {
+      min-width: 2.2ch;
+      text-align: right;
+    }
+    .vertical-expression-answer {
+      border-top: 1px solid #444;
+      margin-top: 4px;
+      padding-top: 4px;
+    }
+
+    .digit-answer-row {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 4px;
+    }
+
+    .digit-column {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .digit-btn {
+      width: 32px;
+      height: 26px;
+      border-radius: 10px;
+      border: 1px solid #c5cae9;
+      background: #ffffff;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 100ms ease, transform 80ms ease, box-shadow 80ms ease;
+    }
+    .digit-btn:active {
+      transform: scale(0.95);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+
+    .digit-value-box {
+      min-width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      border: 1px solid #c5cae9;
+      background: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    @keyframes hint-blink {
+      0%   { background: #ffffff; box-shadow: 0 0 0 0 rgba(255,235,59,0); }
+      50%  { background: #fff9c4; box-shadow: 0 0 0 6px rgba(255,235,59,0.4); }
+      100% { background: #ffffff; box-shadow: 0 0 0 0 rgba(255,235,59,0.0); }
+    }
+    .digit-hint {
+      animation: hint-blink var(--hint-blink-ms) ease-in-out infinite;
+    }
+    .ok-hint {
+      animation: hint-blink var(--hint-blink-ms) ease-in-out infinite;
+    }
+
+    .ok-button {
+      margin-top: 10px;
+      padding: 10px 28px;
+      border-radius: 999px;
+      border: none;
+      background: linear-gradient(135deg, #66bb6a, #43a047);
+      color: #fff;
+      font-size: 20px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+      transition: transform 80ms ease, box-shadow 80ms ease, opacity 80ms ease;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .ok-button:active {
+      transform: translateY(1px);
+      box-shadow: 0 2px 5px rgba(0,0,0,0.18);
+    }
+
+    .result-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding-bottom: 24px;
+      text-align: center;
+      line-height: var(--line-height-ruby);
+    }
+
+    .result-title {
+      font-size: 26px;
+      font-weight: bold;
+    }
+
+    .result-score {
+      font-size: var(--font-size-huge);
+      font-weight: bold;
+      color: #f57c00;
+    }
+
+    .result-sub {
+      font-size: 14px;
+      color: #555;
+    }
+
+    ruby {
+      ruby-position: over;
+    }
+    rt {
+      font-size: 0.5em;  /* ふりがなはかなり小さめに */
+      line-height: 1;
+    }
+
+    .import-question {
+      font-size: var(--font-size-large);
+      font-family: var(--quiz-font-family);
+    }
+
+    .import-choices,
+    .import-choices ul.mcq-choices {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .shape-canvas,
+    .solid-canvas,
+    .music-canvas {
+      display: block;
+      margin: 8px auto 0 auto;
+      background: #ffffff;
+      border-radius: 12px;
+      border: 1px solid #c5cae9;
+    }
+
+    /* abcjs で描画する音楽用コンテナ */
+    .music-abc-container {
+      display: block;
+      margin: 8px auto 0 auto;
+      background: #ffffff;
+      border-radius: 12px;
+      border: 1px solid #c5cae9;
+      padding: 8px;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #c5cae9;
+      border-radius: 999px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-root" id="appRoot">
+    <header class="app-bar">
+      <div class="app-bar-title">
+        <span>
+          <ruby>学習<rt>がくしゅう</rt></ruby>
+          <ruby>クイズ<rt>くいず</rt></ruby>
+        </span>
+      </div>
+      <div class="app-bar-button-row" id="appBarButtons"></div>
+    </header>
+
+    <div class="correct-overlay" id="correctOverlay">
+      <div class="correct-message" id="correctMessage"></div>
+    </div>
+    <div class="next-tap-overlay" id="nextTapOverlay"></div>
+    <div class="score-popup" id="scorePopup"></div>
+
+    <main class="screen title-screen active" id="screenTitle">
+      <div id="titleWarningArea"></div>
+
+      <div class="title-center">
+        <button class="start-button" id="startQuizButton">
+          <ruby>クイズ<rt>くいず</rt></ruby>を
+          <ruby>はじめる<rt>はじめる</rt></ruby>
+        </button>
+
+        <div class="daily-score-box">
+          <div>
+            <ruby>今日<rt>きょう</rt></ruby>の
+            <ruby>合計<rt>ごうけい</rt></ruby>
+            <ruby>得点<rt>とくてん</rt></ruby>
+          </div>
+          <div class="daily-score-number" id="dailyScoreValue">0</div>
+          <div style="font-size:12px;margin-top:4px;">
+            ※
+            <ruby>深夜<rt>しんや</rt></ruby>0:00 に
+            <ruby>毎日<rt>まいにち</rt></ruby>
+            リセットされます
+          </div>
+        </div>
+      </div>
+
+      <div class="title-footer">
+        このアプリは，
+        <ruby>一桁<rt>ひとけた</rt></ruby>・
+        <ruby>二桁<rt>ふたけた</rt></ruby>の
+        <ruby>足<rt>た</rt></ruby>し
+        <ruby>算<rt>ざん</rt></ruby>と
+        <ruby>引<rt>ひ</rt></ruby>き
+        <ruby>算<rt>ざん</rt></ruby>，
+        かんたんな
+        <ruby>図形<rt>ずけい</rt></ruby>・
+        <ruby>音<rt>おと</rt></ruby>の
+        <ruby>問題<rt>もんだい</rt></ruby>と，
+        mcq.csv からの
+        <ruby>読<rt>よ</rt></ruby>み
+        <ruby>込<rt>こ</rt></ruby>み
+        <ruby>問題<rt>もんだい</rt></ruby>で
+        あそべます。
+      </div>
+    </main>
+
+    <main class="screen settings-screen" id="screenSettings">
+      <section class="settings-section">
+        <div class="settings-section-title">
+          <ruby>時間<rt>じかん</rt></ruby>の
+          <ruby>せってい<rt>せってい</rt></ruby>
+        </div>
+        <div class="settings-row">
+          <label for="inputDuration">
+            1
+            <ruby>回<rt>かい</rt></ruby>の
+            <ruby>クイズ<rt>くいず</rt></ruby>の
+            <ruby>時間<rt>じかん</rt></ruby>
+          </label>
+          <div>
+            <input type="number" id="inputDuration" class="sec-input" min="10" max="999" />
+            <span class="suffix">
+              <ruby>秒<rt>びょう</rt></ruby>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section class="settings-section">
+        <div class="settings-section-title">
+          <ruby>ジャンル<rt>じゃんる</rt></ruby>ごとの
+          <ruby>出題<rt>しゅつだい</rt></ruby> ON / OFF
+        </div>
+
+        <div class="settings-row">
+          <label>
+            <ruby>一桁<rt>ひとけた</rt></ruby>の
+            <ruby>足<rt>た</rt></ruby>し
+            <ruby>算<rt>ざん</rt></ruby>・
+            <ruby>引<rt>ひ</rt></ruby>き
+            <ruby>算<rt>ざん</rt></ruby>
+          </label>
+          <div class="toggle on" data-genre-id="arith_1digit"></div>
+        </div>
+
+        <div class="settings-row">
+          <label>
+            <ruby>二桁<rt>ふたけた</rt></ruby>どうしの
+            <ruby>足<rt>た</rt></ruby>し
+            <ruby>算<rt>ざん</rt></ruby>・
+            <ruby>引<rt>ひ</rt></ruby>き
+            <ruby>算<rt>ざん</rt></ruby>
+            （
+            <ruby>筆算<rt>ひっさん</rt></ruby>）
+          </label>
+          <div class="toggle on" data-genre-id="arith_2digit_column"></div>
+        </div>
+
+        <div class="settings-row">
+          <label>
+            <ruby>平面<rt>へいめん</rt></ruby>
+            <ruby>図形<rt>ずけい</rt></ruby>
+            （
+            <ruby>図形<rt>ずけい</rt></ruby>→なまえ）
+          </label>
+          <div class="toggle on" data-genre-id="plane_shapes"></div>
+        </div>
+
+        <div class="settings-row">
+          <label>
+            <ruby>立体<rt>りったい</rt></ruby>
+            <ruby>図形<rt>ずけい</rt></ruby>
+            （かたち→なまえ）
+          </label>
+          <div class="toggle on" data-genre-id="solid_shapes"></div>
+        </div>
+
+        <div class="settings-row">
+          <label>
+            <ruby>音<rt>おと</rt></ruby>の
+            <ruby>名前<rt>なまえ</rt></ruby>
+            （ト音記号・アルファベット音名）
+          </label>
+          <div class="toggle on" data-genre-id="music_all"></div>
+        </div>
+
+        <div class="settings-row">
+          <label>
+            mcq.csv からの
+            <ruby>インポート<rt>いんぽーと</rt></ruby>
+            <ruby>問題<rt>もんだい</rt></ruby>
+            （すべて）
+          </label>
+          <div class="toggle on" data-genre-id="import_mcq"></div>
+        </div>
+
+        <div class="settings-row">
+          <label>
+            <ruby>国語<rt>こくご</rt></ruby>
+            （mcqから：
+            <ruby>漢字<rt>かんじ</rt></ruby>・
+            <ruby>文法<rt>ぶんぽう</rt></ruby> など）
+          </label>
+          <div class="toggle on" data-genre-id="japanese_from_mcq"></div>
+        </div>
+
+        <div class="settings-row">
+          <label>
+            <ruby>色<rt>いろ</rt></ruby>・
+            <ruby>混色<rt>こんしょく</rt></ruby>
+            （mcqから）
+          </label>
+          <div class="toggle on" data-genre-id="colors_from_mcq"></div>
+        </div>
+      </section>
+
+      <div class="settings-footer">
+        <button class="icon-button" id="buttonSettingsBack">
+          <span>もどる</span>
+        </button>
+      </div>
+    </main>
+
+    <main class="screen quiz-screen" id="screenQuiz">
+      <div>
+        <div class="timer-bar-wrapper">
+          <div class="timer-bar-inner" id="timerBar"></div>
+        </div>
+        <div class="timer-label">
+          のこり
+          <span id="timerSeconds">0</span>
+          <ruby>秒<rt>びょう</rt></ruby>
+        </div>
+      </div>
+
+      <div class="quiz-main">
+        <section class="quiz-question-area">
+          <div class="quiz-question-text" id="questionText"></div>
+        </section>
+
+        <section class="quiz-answer-area" id="answerArea"></section>
+      </div>
+    </main>
+
+    <main class="screen result-screen" id="screenResult">
+      <div class="result-title">
+        <ruby>結果<rt>けっか</rt></ruby>
+        <ruby>発表<rt>はっぴょう</rt></ruby>
+      </div>
+      <div class="result-score" id="resultScore">0</div>
+      <div class="result-sub" id="resultSub"></div>
+
+      <div>
+        <button class="start-button" id="retryButton">
+          もういちど
+          <ruby>チャレンジ<rt>ちゃれんじ</rt></ruby>
+        </button>
+      </div>
+      <div>
+        <button class="icon-button" id="resultToTitleButton">
+          <span>
+            <ruby>タイトル<rt>たいとる</rt></ruby>にもどる
+          </span>
+        </button>
+      </div>
+    </main>
+  </div>
+
+  <!--
+    abcjs 用ライブラリ
+    ------------------------------------------------------------
+    - abcjs の配布物から "dist/abcjs-basic-min.js" を取得し，
+      この index.html と同じフォルダに
+        abcjs-basic-min.js
+      という名前で配置してください。
+    - CDN は使用していません。ローカルファイルとして読み込みます。
+  -->
+  <script src="abcjs-basic-min.js"></script>
+
+  <script>
+    // ============================================================
+    //  パラメータ・定数定義
+    // ============================================================
+    const CONFIG = {
+      defaultDurationSeconds: 120,
+      baseMaxScore: 10,
+      wrongPenaltyFactor: 0.5,
+      minScorePerQuestion: 1,
+      timerIntervalMs: 250,
+      storageDailyScoreKey: "quiz_daily_score_v1",
+      storageSettingsKey: "quiz_settings_v1",
+      audioMasterGain: 0.15
+    };
+
+    const NOTE_FREQUENCIES = {
+      G5: 783.99,
+      E6: 1318.51,
+      C6: 1046.50,
+      C2: 65.41
+    };
+
+    // 平面図形（図形 → 名前）用
+    const PLANE_SHAPE_TYPES = [
+      { id: "point", label: "点", labelRuby: "<ruby>点<rt>てん</rt></ruby>", kind: "point" },
+      { id: "line", label: "直線", labelRuby: "<ruby>直線<rt>ちょくせん</rt></ruby>", kind: "line" },
+      { id: "circle", label: "円", labelRuby: "<ruby>円<rt>えん</rt></ruby>", kind: "circle" },
+      { id: "tri", label: "三角形", labelRuby: "<ruby>三角形<rt>さんかくけい</rt></ruby>", kind: "regularPolygon", sides: 3 },
+      { id: "quad", label: "四角形", labelRuby: "<ruby>四角形<rt>しかくけい</rt></ruby>", kind: "regularPolygon", sides: 4 },
+      { id: "pent", label: "五角形", labelRuby: "<ruby>五角形<rt>ごかっけい</rt></ruby>", kind: "regularPolygon", sides: 5 },
+      { id: "hex", label: "六角形", labelRuby: "<ruby>六角形<rt>ろっかっけい</rt></ruby>", kind: "regularPolygon", sides: 6 },
+      { id: "hept", label: "七角形", labelRuby: "<ruby>七角形<rt>ななかっけい</rt></ruby>", kind: "regularPolygon", sides: 7 },
+      { id: "oct", label: "八角形", labelRuby: "<ruby>八角形<rt>はちかっけい</rt></ruby>", kind: "regularPolygon", sides: 8 }
+    ];
+
+    // 立体図形用（label は素の漢字，labelRuby はふりがな付き）
+    const SOLID_SHAPE_TYPES = [
+      { id: "sphere", label: "球", labelRuby: "<ruby>球<rt>きゅう</rt></ruby>", kind: "sphere", parents: [] },
+      { id: "cone", label: "円錐", labelRuby: "<ruby>円錐<rt>えんすい</rt></ruby>", kind: "cone", parents: [] },
+      { id: "cylinder", label: "円柱", labelRuby: "<ruby>円柱<rt>えんちゅう</rt></ruby>", kind: "cylinder", parents: [] },
+      { id: "tri_pyramid", label: "三角錐", labelRuby: "<ruby>三角錐<rt>さんかくすい</rt></ruby>", kind: "pyramid", baseSides: 3, parents: [] },
+      { id: "rect_pyramid", label: "四角錐", labelRuby: "<ruby>四角錐<rt>しかくすい</rt></ruby>", kind: "pyramid", baseSides: 4, parents: [] },
+      { id: "tri_prism", label: "三角柱", labelRuby: "<ruby>三角柱<rt>さんかくちゅう</rt></ruby>", kind: "prism", baseSides: 3, parents: [] },
+      { id: "rect_prism", label: "四角柱", labelRuby: "<ruby>四角柱<rt>しかくちゅう</rt></ruby>", kind: "prism", baseSides: 4, parents: [] },
+      // 立方体は四角柱の下位カテゴリ
+      { id: "cube", label: "立方体", labelRuby: "<ruby>立方体<rt>りっぽうたい</rt></ruby>", kind: "prism", baseSides: 4, isCube: true, parents: ["rect_prism"] }
+    ];
+
+    // 音名クイズ用（C4〜B4）／abcjs 用の ABC 記法も付与
+    const MUSIC_NOTES = [
+      { midi: 60, letter: "C", abc: "C" },
+      { midi: 62, letter: "D", abc: "D" },
+      { midi: 64, letter: "E", abc: "E" },
+      { midi: 65, letter: "F", abc: "F" },
+      { midi: 67, letter: "G", abc: "G" },
+      { midi: 69, letter: "A", abc: "A" },
+      { midi: 71, letter: "B", abc: "B" }
+    ];
+
+    // ============================================================
+    //  Web Audio
+    // ============================================================
+    const AudioEngine = (() => {
+      let audioContext = null;
+
+      function ensureContext() {
+        if (!audioContext) {
+          const Ctor = window.AudioContext || window.webkitAudioContext;
+          if (!Ctor) return null;
+          audioContext = new Ctor();
+        }
+        return audioContext;
+      }
+
+      function playTone(freq, durationSec, type = "sine", gainLevel = CONFIG.audioMasterGain) {
+        const ctx = ensureContext();
+        if (!ctx) return;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = type;
+        osc.frequency.value = freq;
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        const now = ctx.currentTime;
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(gainLevel, now + 0.01);
+        gain.gain.linearRampToValueAtTime(0.0001, now + durationSec);
+
+        osc.start(now);
+        osc.stop(now + durationSec + 0.05);
+      }
+
+      function midiToFreq(midi) {
+        return 440 * Math.pow(2, (midi - 69) / 12);
+      }
+
+      return {
+        playTone,
+        playSettingsBeep() {
+          playTone(NOTE_FREQUENCIES.G5, 0.1, "sine");
+        },
+        playQuestionBeep() {
+          playTone(NOTE_FREQUENCIES.G5, 0.1, "sine");
+        },
+        playCorrect() {
+          playTone(NOTE_FREQUENCIES.E6, 0.2, "sine");
+          setTimeout(() => {
+            playTone(NOTE_FREQUENCIES.C6, 0.2, "sine");
+          }, 200);
+        },
+        playWrong() {
+          playTone(NOTE_FREQUENCIES.C2, 0.3, "sawtooth", 0.18);
+        },
+        playNoteByMidi(midi) {
+          const freq = midiToFreq(midi);
+          playTone(freq, 0.6, "sine", CONFIG.audioMasterGain);
+        }
+      };
+    })();
+
+    // ============================================================
+    //  状態管理
+    // ============================================================
+    const appState = {
+      mode: "title",
+      settings: {
+        durationSeconds: CONFIG.defaultDurationSeconds,
+        genres: {
+          arith_1digit: true,
+          arith_2digit_column: true,
+          plane_shapes: true,
+          solid_shapes: true,
+          music_all: true,
+          import_mcq: true,
+          japanese_from_mcq: true,
+          colors_from_mcq: true
+        }
+      },
+      dailyScore: {
+        date: null,
+        score: 0
+      },
+      mcqLoaded: false,
+      mcqLoadError: false,
+      mcqByGenre: {},
+      quiz: {
+        running: false,
+        startTimestamp: 0,
+        remainingMs: 0,
+        timerId: null,
+        timeUp: false,
+        totalScoreThisRun: 0,
+        questionsAnswered: 0,
+        currentQuestion: null,
+        currentQuestionScore: 0
+      }
+    };
+
+    const dom = {};
+
+    // 正解オーバーレイ用のタイマー管理
+    let correctMessageTimeout1 = null;
+    let correctMessageTimeout2 = null;
+
+    function clearCorrectMessageTimers() {
+      if (correctMessageTimeout1 !== null) {
+        clearTimeout(correctMessageTimeout1);
+        correctMessageTimeout1 = null;
+      }
+      if (correctMessageTimeout2 !== null) {
+        clearTimeout(correctMessageTimeout2);
+        correctMessageTimeout2 = null;
+      }
+    }
+
+    function cacheDom() {
+      dom.screenTitle = document.getElementById("screenTitle");
+      dom.screenSettings = document.getElementById("screenSettings");
+      dom.screenQuiz = document.getElementById("screenQuiz");
+      dom.screenResult = document.getElementById("screenResult");
+
+      dom.appBarButtons = document.getElementById("appBarButtons");
+
+      dom.startQuizButton = document.getElementById("startQuizButton");
+      dom.dailyScoreValue = document.getElementById("dailyScoreValue");
+      dom.titleWarningArea = document.getElementById("titleWarningArea");
+
+      dom.inputDuration = document.getElementById("inputDuration");
+      dom.buttonSettingsBack = document.getElementById("buttonSettingsBack");
+
+      dom.timerBar = document.getElementById("timerBar");
+      dom.timerSeconds = document.getElementById("timerSeconds");
+      dom.questionText = document.getElementById("questionText");
+      dom.answerArea = document.getElementById("answerArea");
+
+      dom.resultScore = document.getElementById("resultScore");
+      dom.resultSub = document.getElementById("resultSub");
+      dom.retryButton = document.getElementById("retryButton");
+      dom.resultToTitleButton = document.getElementById("resultToTitleButton");
+
+      dom.correctOverlay = document.getElementById("correctOverlay");
+      dom.correctMessage = document.getElementById("correctMessage");
+      dom.nextTapOverlay = document.getElementById("nextTapOverlay");
+      dom.scorePopup = document.getElementById("scorePopup");
+    }
+
+    // ============================================================
+    //  日付・ローカルストレージ
+    // ============================================================
+    function getTodayKey() {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, "0");
+      const d = String(now.getDate()).padStart(2, "0");
+      return `${y}-${m}-${d}`;
+    }
+
+    function loadDailyScore() {
+      const key = CONFIG.storageDailyScoreKey;
+      const today = getTodayKey();
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) {
+          appState.dailyScore.date = today;
+          appState.dailyScore.score = 0;
+          return;
+        }
+        const data = JSON.parse(raw);
+        if (data.date === today) {
+          appState.dailyScore.date = data.date;
+          appState.dailyScore.score = data.score || 0;
+        } else {
+          appState.dailyScore.date = today;
+          appState.dailyScore.score = 0;
+        }
+      } catch {
+        appState.dailyScore.date = today;
+        appState.dailyScore.score = 0;
+      }
+    }
+
+    function saveDailyScore() {
+      const key = CONFIG.storageDailyScoreKey;
+      const today = getTodayKey();
+      appState.dailyScore.date = today;
+      try {
+        localStorage.setItem(
+          key,
+          JSON.stringify({
+            date: appState.dailyScore.date,
+            score: appState.dailyScore.score
+          })
+        );
+      } catch {}
+    }
+
+    function updateDailyScoreDisplay() {
+      dom.dailyScoreValue.textContent = String(appState.dailyScore.score);
+    }
+
+    function loadSettings() {
+      const key = CONFIG.storageSettingsKey;
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (typeof data.durationSeconds === "number") {
+          appState.settings.durationSeconds = Math.max(
+            10,
+            Math.min(999, Math.round(data.durationSeconds))
+          );
+        }
+        if (data.genres && typeof data.genres === "object") {
+          for (const k in appState.settings.genres) {
+            if (Object.prototype.hasOwnProperty.call(data.genres, k)) {
+              appState.settings.genres[k] = !!data.genres[k];
+            }
+          }
+        }
+      } catch {}
+    }
+
+    function saveSettings() {
+      const key = CONFIG.storageSettingsKey;
+      const payload = {
+        durationSeconds: appState.settings.durationSeconds,
+        genres: appState.settings.genres
+      };
+      try {
+        localStorage.setItem(key, JSON.stringify(payload));
+      } catch {}
+    }
+
+    // ============================================================
+    //  画面切り替え
+    // ============================================================
+    function showScreen(mode) {
+      appState.mode = mode;
+      dom.screenTitle.classList.toggle("active", mode === "title");
+      dom.screenSettings.classList.toggle("active", mode === "settings");
+      dom.screenQuiz.classList.toggle("active", mode === "quiz");
+      dom.screenResult.classList.toggle("active", mode === "result");
+
+      dom.appBarButtons.innerHTML = "";
+
+      if (mode === "title") {
+        const btn = document.createElement("button");
+        btn.className = "icon-button";
+        btn.innerHTML =
+          '<span><ruby>設定<rt>せってい</rt></ruby></span>';
+        btn.addEventListener("click", () => {
+          enterSettings();
+        });
+        dom.appBarButtons.appendChild(btn);
+      } else if (mode === "settings") {
+        const btn = document.createElement("button");
+        btn.className = "icon-button";
+        btn.innerHTML =
+          '<span><ruby>タイトル<rt>たいとる</rt></ruby></span>';
+        btn.addEventListener("click", () => {
+          leaveSettingsToTitle();
+        });
+        dom.appBarButtons.appendChild(btn);
+      } else if (mode === "quiz") {
+        const btn = document.createElement("button");
+        btn.className = "icon-button";
+        btn.innerHTML =
+          '<span><ruby>タイトル<rt>たいとる</rt></ruby>にもどる</span>';
+        btn.addEventListener("click", () => {
+          stopQuizAndGoTitle();
+        });
+        dom.appBarButtons.appendChild(btn);
+      } else if (mode === "result") {
+        const btn = document.createElement("button");
+        btn.className = "icon-button";
+        btn.innerHTML =
+          '<span><ruby>設定<rt>せってい</rt></ruby></span>';
+        btn.addEventListener("click", () => {
+          enterSettings();
+        });
+        dom.appBarButtons.appendChild(btn);
+      }
+    }
+
+    function enterSettings() {
+      AudioEngine.playSettingsBeep();
+      applySettingsToInputs();
+      showScreen("settings");
+    }
+
+    function leaveSettingsToTitle() {
+      readSettingsFromInputs();
+      saveSettings();
+      AudioEngine.playSettingsBeep();
+      showScreen("title");
+    }
+
+    function applySettingsToInputs() {
+      dom.inputDuration.value = appState.settings.durationSeconds;
+      const toggles = document.querySelectorAll(".toggle");
+      toggles.forEach((tg) => {
+        const id = tg.getAttribute("data-genre-id");
+        if (!id) return;
+        const v = !!appState.settings.genres[id];
+        tg.classList.toggle("on", v);
+      });
+    }
+
+    function readSettingsFromInputs() {
+      let sec = parseInt(dom.inputDuration.value, 10);
+      if (!Number.isFinite(sec)) sec = CONFIG.defaultDurationSeconds;
+      sec = Math.max(10, Math.min(999, sec));
+      appState.settings.durationSeconds = sec;
+
+      const toggles = document.querySelectorAll(".toggle");
+      toggles.forEach((tg) => {
+        const id = tg.getAttribute("data-genre-id");
+        if (!id) return;
+        const on = tg.classList.contains("on");
+        appState.settings.genres[id] = on;
+      });
+    }
+
+    function updateTitleWarnings() {
+      dom.titleWarningArea.innerHTML = "";
+      if (appState.mcqLoadError) {
+        const div = document.createElement("div");
+        div.className = "warning-box";
+        div.innerHTML =
+          'mcq.csv が<br />' +
+          '<ruby>読<rt>よ</rt></ruby>み' +
+          '<ruby>込<rt>こ</rt></ruby>めませんでした。<br />' +
+          '<ruby>自動<rt>じどう</rt></ruby>' +
+          '<ruby>生成<rt>せいせい</rt></ruby>' +
+          '<ruby>問題<rt>もんだい</rt></ruby>だけであそべます。<br />' +
+          'ブラウザでこのファイルを<br />' +
+          '「file://」からひらいているときは，<br />' +
+          'かんたんなローカルサーバー<br />' +
+          '(例: python -m http.server) を<br />' +
+          '<ruby>使<rt>つか</rt></ruby>ってひらいてください。';
+        dom.titleWarningArea.appendChild(div);
+      } else if (!appState.mcqLoaded) {
+        const div = document.createElement("div");
+        div.className = "warning-box";
+        div.innerHTML =
+          'mcq.csv をロードしています…<br />' +
+          '（<ruby>失敗<rt>しっぱい</rt></ruby>したら ' +
+          '<ruby>自動<rt>じどう</rt></ruby>' +
+          '<ruby>生成<rt>せいせい</rt></ruby>' +
+          '<ruby>問題<rt>もんだい</rt></ruby>だけになります）';
+        dom.titleWarningArea.appendChild(div);
+      }
+    }
+
+    // ============================================================
+    //  CSV 読み込み
+    // ============================================================
+    function parseCsv(text) {
+      const rows = [];
+      let row = [];
+      let field = "";
+      let inQuotes = false;
+
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (inQuotes) {
+          if (ch === '"') {
+            if (i + 1 < text.length && text[i + 1] === '"') {
+              field += '"';
+              i++;
+            } else {
+              inQuotes = false;
+            }
+          } else {
+            field += ch;
+          }
+        } else {
+          if (ch === '"') {
+            inQuotes = true;
+          } else if (ch === ",") {
+            row.push(field);
+            field = "";
+          } else if (ch === "\r") {
+          } else if (ch === "\n") {
+            row.push(field);
+            rows.push(row);
+            row = [];
+            field = "";
+          } else {
+            field += ch;
+          }
+        }
+      }
+      if (field.length > 0 || row.length > 0) {
+        row.push(field);
+        rows.push(row);
+      }
+      return rows;
+    }
+
+    function loadMcqCsv() {
+      fetch("mcq.csv")
+        .then((res) => {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.text();
+        })
+        .then((text) => {
+          const rows = parseCsv(text);
+          if (!rows.length) return;
+          const header = rows[0];
+          const idxGenre = header.indexOf("genre");
+          const idxQ = header.indexOf("question_html");
+          const idxChoices = header.indexOf("choices_html");
+          const idxMult = header.indexOf("score_multiplier");
+          for (let i = 1; i < rows.length; i++) {
+            const r = rows[i];
+            if (!r || r.length < 3) continue;
+            const genre = (r[idxGenre] || "").trim();
+            const qhtml = r[idxQ] || "";
+            const chtml = r[idxChoices] || "";
+            const multRaw = r[idxMult] || "1";
+            const mult = parseFloat(multRaw || "1") || 1;
+            if (!genre || !qhtml || !chtml) continue;
+            if (!appState.mcqByGenre[genre]) {
+              appState.mcqByGenre[genre] = [];
+            }
+            appState.mcqByGenre[genre].push({
+              genre,
+              questionHtml: qhtml,
+              choicesHtml: chtml,
+              scoreMultiplier: mult
+            });
+          }
+          appState.mcqLoaded = true;
+          updateTitleWarnings();
+        })
+        .catch(() => {
+          appState.mcqLoaded = false;
+          appState.mcqLoadError = true;
+          updateTitleWarnings();
+        });
+    }
+
+    // ============================================================
+    //  クイズロジック
+    // ============================================================
+    function resetQuizState() {
+      const sec = appState.settings.durationSeconds;
+      appState.quiz.running = false;
+      appState.quiz.startTimestamp = 0;
+      appState.quiz.remainingMs = sec * 1000;
+      appState.quiz.timeUp = false;
+      appState.quiz.totalScoreThisRun = 0;
+      appState.quiz.questionsAnswered = 0;
+      appState.quiz.currentQuestion = null;
+      appState.quiz.currentQuestionScore = 0;
+
+      if (appState.quiz.timerId !== null) {
+        clearInterval(appState.quiz.timerId);
+        appState.quiz.timerId = null;
+      }
+
+      dom.timerSeconds.textContent = sec;
+      dom.timerBar.style.transform = "scaleX(1)";
+      dom.timerBar.style.background =
+        "linear-gradient(to right, #66bb6a, #ffb300)";
+    }
+
+    function startQuiz() {
+      resetQuizState();
+      appState.quiz.running = true;
+      appState.quiz.startTimestamp = performance.now();
+      appState.quiz.timeUp = false;
+
+      const totalMs = appState.quiz.remainingMs;
+      const startMs = performance.now();
+
+      appState.quiz.timerId = setInterval(() => {
+        const now = performance.now();
+        const elapsed = now - startMs;
+        let remain = totalMs - elapsed;
+        if (remain <= 0) {
+          remain = 0;
+          appState.quiz.timeUp = true;
+        }
+        appState.quiz.remainingMs = remain;
+
+        const secRemain = Math.ceil(remain / 1000);
+        dom.timerSeconds.textContent = secRemain;
+
+        const ratio = totalMs > 0 ? Math.max(0, remain / totalMs) : 0;
+        dom.timerBar.style.transform = `scaleX(${ratio})`;
+        if (ratio < 0.3) {
+          dom.timerBar.style.background =
+            "linear-gradient(to right, #ef5350, #ff7043)";
+        } else if (ratio < 0.6) {
+          dom.timerBar.style.background =
+            "linear-gradient(to right, #ffca28, #ef6c00)";
+        }
+
+        if (remain <= 0) {
+          clearInterval(appState.quiz.timerId);
+          appState.quiz.timerId = null;
+        }
+      }, CONFIG.timerIntervalMs);
+
+      showScreen("quiz");
+      loadNextQuestion();
+    }
+
+    function stopQuizAndGoTitle() {
+      if (appState.quiz.timerId !== null) {
+        clearInterval(appState.quiz.timerId);
+        appState.quiz.timerId = null;
+      }
+      appState.quiz.running = false;
+      showScreen("title");
+    }
+
+    function endQuizToResult() {
+      if (appState.quiz.timerId !== null) {
+        clearInterval(appState.quiz.timerId);
+        appState.quiz.timerId = null;
+      }
+      appState.quiz.running = false;
+
+      appState.dailyScore.score += appState.quiz.totalScoreThisRun;
+      saveDailyScore();
+      updateDailyScoreDisplay();
+
+      dom.resultScore.textContent = appState.quiz.totalScoreThisRun;
+      dom.resultSub.textContent =
+        `全問あわせて ${appState.quiz.questionsAnswered} 問 ときました。`;
+
+      showScreen("result");
+
+      setTimeout(() => {
+        dom.resultScore.style.transform = "scale(1.15)";
+        dom.resultScore.style.transition = "transform 200ms ease";
+        setTimeout(() => {
+          dom.resultScore.style.transform = "scale(1)";
+        }, 220);
+        AudioEngine.playCorrect();
+      }, 1000);
+    }
+
+    function getActiveGenres() {
+      const g = appState.settings.genres;
+      const all = [];
+      if (g.arith_1digit) all.push("arith_1digit");
+      if (g.arith_2digit_column) all.push("arith_2digit_column");
+      if (g.plane_shapes) all.push("plane_shapes");
+      if (g.solid_shapes) all.push("solid_shapes");
+      if (g.music_all) all.push("music_all");
+      if (g.import_mcq) all.push("import_mcq");
+      if (g.japanese_from_mcq) all.push("japanese_from_mcq");
+      if (g.colors_from_mcq) all.push("colors_from_mcq");
+      return all;
+    }
+
+    function getGenresForThisRun() {
+      let active = getActiveGenres();
+      if (!active.length) {
+        for (const k in appState.settings.genres) {
+          appState.settings.genres[k] = true;
+        }
+        active = getActiveGenres();
+      }
+      return active;
+    }
+
+    function chooseGenreForQuestion() {
+      const genres = getGenresForThisRun();
+      if (!genres.length) return "arith_1digit";
+      const idx = Math.floor(Math.random() * genres.length);
+      return genres[idx];
+    }
+
+    function loadNextQuestion() {
+      dom.correctOverlay.classList.remove("active");
+      dom.nextTapOverlay.classList.remove("active");
+      dom.scorePopup.classList.remove("active");
+      dom.scorePopup.textContent = "";
+
+      clearCorrectMessageTimers();
+      if (dom.correctMessage) {
+        dom.correctMessage.classList.remove("blink");
+        dom.correctMessage.innerHTML = "";
+        dom.correctMessage.style.visibility = "visible";
+      }
+
+      dom.answerArea.innerHTML = "";
+      dom.questionText.innerHTML = "";
+
+      const genre = chooseGenreForQuestion();
+      let q = null;
+
+      if (genre === "arith_1digit") {
+        q = generateArith1DigitQuestion();
+      } else if (genre === "arith_2digit_column") {
+        q = generateArith2DigitColumnQuestion();
+      } else if (genre === "plane_shapes") {
+        q = generatePlaneShapeQuestion();
+      } else if (genre === "solid_shapes") {
+        q = generateSolidShapeQuestion();
+      } else if (genre === "music_all") {
+        q = generateMusicQuestion();
+      } else if (
+        genre === "import_mcq" ||
+        genre === "japanese_from_mcq" ||
+        genre === "colors_from_mcq"
+      ) {
+        q = generateImportMcqQuestion(genre);
+        if (!q) {
+          const fallbackGenres = ["arith_1digit", "arith_2digit_column"];
+          const fidx = Math.floor(Math.random() * fallbackGenres.length);
+          q =
+            fallbackGenres[fidx] === "arith_2digit_column"
+              ? generateArith2DigitColumnQuestion()
+              : generateArith1DigitQuestion();
+        }
+      } else {
+        q = generateArith1DigitQuestion();
+      }
+
+      appState.quiz.currentQuestion = q;
+      appState.quiz.currentQuestionScore = q.maxScore;
+
+      dom.questionText.innerHTML = q.questionHtml;
+      renderAnswerUi(q);
+
+      if (typeof q.postRender === "function") {
+        q.postRender();
+      }
+
+      AudioEngine.playQuestionBeep();
+    }
+
+    // ============================================================
+    //  算数 一桁
+    // ============================================================
+    function generateArith1DigitQuestion() {
+      const a = Math.floor(Math.random() * 10);
+      const b = Math.floor(Math.random() * 10);
+      const op = Math.random() < 0.5 ? "+" : "-";
+      let x = a;
+      let y = b;
+      if (op === "-" && x < y) {
+        x = b;
+        y = a;
+      }
+      const correct = op === "+" ? x + y : x - y;
+
+      const questionHtml =
+        `<div>` +
+        `<ruby>つぎ<rt>つぎ</rt></ruby>の ` +
+        `<ruby>計算<rt>けいさん</rt></ruby>を ` +
+        `<ruby>しましょう<rt>しましょう</rt></ruby>。</div>` +
+        `<div class="digit-question-wrapper">` +
+        `<div style="font-size:28px;margin-top:4px;">${x} ${op} ${y} = ?</div>` +
+        `</div>`;
+
+      return {
+        type: "digit-input",
+        maxScore: CONFIG.baseMaxScore,
+        correctValue: correct,
+        digitCount: 2,
+        meta: {
+          display: "inline"
+        },
+        questionHtml
+      };
+    }
+
+    // ============================================================
+    //  算数 二桁どうしの筆算（水平位置そろえ）
+    // ============================================================
+    function generateArith2DigitColumnQuestion() {
+      let a = 10 + Math.floor(Math.random() * 90);
+      let b = 10 + Math.floor(Math.random() * 90);
+      const op = Math.random() < 0.5 ? "+" : "-";
+      if (op === "-" && a < b) {
+        const t = a;
+        a = b;
+        b = t;
+      }
+      const correct = op === "+" ? a + b : a - b;
+      const opStr = op === "+" ? "+" : "−";
+
+      const questionHtml =
+        `<div>` +
+        `<ruby>つぎ<rt>つぎ</rt></ruby>の ` +
+        `<ruby>筆算<rt>ひっさん</rt></ruby>を ` +
+        `<ruby>しましょう<rt>しましょう</rt></ruby>。</div>` +
+        `<div class="digit-question-wrapper">` +
+        `<div class="vertical-expression">` +
+        `<div class="vertical-expression-row">` +
+        `<span class="vertical-expression-op">&nbsp;</span>` +
+        `<span class="vertical-expression-num">${a}</span>` +
+        `</div>` +
+        `<div class="vertical-expression-row">` +
+        `<span class="vertical-expression-op">${opStr}</span>` +
+        `<span class="vertical-expression-num">${b}</span>` +
+        `</div>` +
+        `<div class="vertical-expression-row vertical-expression-answer">` +
+        `<span class="vertical-expression-op">&nbsp;</span>` +
+        `<span class="vertical-expression-num">??</span>` +
+        `</div>` +
+        `</div>` +
+        `</div>`;
+
+      return {
+        type: "digit-input",
+        maxScore: CONFIG.baseMaxScore,
+        correctValue: correct,
+        digitCount: 3,
+        meta: {
+          display: "column"
+        },
+        questionHtml
+      };
+    }
+
+    function renderDigitInput(question) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "digit-question-wrapper";
+
+      const digitRow = document.createElement("div");
+      digitRow.className = "digit-answer-row";
+
+      const digits = [];
+      for (let i = 0; i < question.digitCount; i++) {
+        const col = document.createElement("div");
+        col.className = "digit-column";
+
+        const btnUp = document.createElement("button");
+        btnUp.className = "digit-btn digit-hint";
+        btnUp.textContent = "+";
+
+        const valueBox = document.createElement("div");
+        valueBox.className = "digit-value-box";
+        valueBox.textContent = "0";
+
+        const btnDown = document.createElement("button");
+        btnDown.className = "digit-btn digit-hint";
+        btnDown.textContent = "−";
+
+        col.appendChild(btnUp);
+        col.appendChild(valueBox);
+        col.appendChild(btnDown);
+
+        digitRow.appendChild(col);
+
+        digits.push({ btnUp, btnDown, valueBox });
+      }
+
+      const okButton = document.createElement("button");
+      okButton.className = "ok-button";
+      okButton.textContent = "OK";
+
+      wrapper.appendChild(digitRow);
+      wrapper.appendChild(okButton);
+      dom.answerArea.appendChild(wrapper);
+
+      let userDigits = new Array(question.digitCount).fill(0);
+      let firstDigitTouched = false;
+      let okHintTimerId = null;
+
+      function clearDigitHints() {
+        digits.forEach((d) => {
+          d.btnUp.classList.remove("digit-hint");
+          d.btnDown.classList.remove("digit-hint");
+        });
+      }
+
+      function restartOkHintTimer() {
+        if (okHintTimerId !== null) {
+          clearTimeout(okHintTimerId);
+          okHintTimerId = null;
+        }
+        okButton.classList.remove("ok-hint");
+        okHintTimerId = setTimeout(() => {
+          okButton.classList.add("ok-hint");
+        }, 3000);
+      }
+
+      function handleDigitChange(index, delta) {
+        let v = userDigits[index] + delta;
+        if (v < 0) v = 9;
+        if (v > 9) v = 0;
+        userDigits[index] = v;
+        digits[index].valueBox.textContent = String(v);
+
+        if (!firstDigitTouched) {
+          firstDigitTouched = true;
+          clearDigitHints();
+        }
+        restartOkHintTimer();
+      }
+
+      digits.forEach((d, idx) => {
+        d.btnUp.addEventListener("click", () => {
+          handleDigitChange(idx, +1);
+        });
+        d.btnDown.addEventListener("click", () => {
+          handleDigitChange(idx, -1);
+        });
+      });
+
+      okButton.addEventListener("click", () => {
+        const numStr = userDigits.join("");
+        const value = parseInt(numStr, 10) || 0;
+        const correct = question.correctValue;
+        if (value === correct) {
+          handleCorrectAnswer(okButton);
+        } else {
+          handleWrongAnswer(okButton);
+        }
+      });
+
+      // 放置時のみ OK ボタンを点滅させるため，
+      // 開始時にも「非ハイライト状態」からタイマーを起動する
+      restartOkHintTimer();
+
+      appState.quiz.currentQuestion.userDigits = userDigits;
+    }
+
+    // ============================================================
+    //  平面図形（図形 → 名前）
+    // ============================================================
+    function generatePlaneShapeQuestion() {
+      const baseIndex = Math.floor(Math.random() * PLANE_SHAPE_TYPES.length);
+      const baseShape = PLANE_SHAPE_TYPES[baseIndex];
+
+      const labelsPool = PLANE_SHAPE_TYPES.map((s) => s.label);
+      const labelRubyMap = {};
+      PLANE_SHAPE_TYPES.forEach((s) => {
+        labelRubyMap[s.label] = s.labelRuby || s.label;
+      });
+
+      const correctLabel = baseShape.label;
+
+      const otherLabels = labelsPool.filter((l) => l !== correctLabel);
+      shuffleArray(otherLabels);
+      const pickedOthers = otherLabels.slice(0, 3);
+      const allLabels = [correctLabel, ...pickedOthers];
+      shuffleArray(allLabels);
+
+      const choices = allLabels.map((lab, idx) => ({
+        id: "plane_" + idx,
+        html: labelRubyMap[lab] || lab,
+        correct: lab === correctLabel
+      }));
+
+      const questionHtml =
+        `<div>` +
+        `<ruby>つぎ<rt>つぎ</rt></ruby>の ` +
+        `<ruby>図形<rt>ずけい</rt></ruby>の ` +
+        `<ruby>名前<rt>なまえ</rt></ruby>を ` +
+        `<ruby>えらびましょう<rt>えらびましょう</rt></ruby>。</div>` +
+        `<canvas id="planeShapeCanvas" class="shape-canvas" width="220" height="220"></canvas>`;
+
+      const q = {
+        type: "mcq",
+        maxScore: CONFIG.baseMaxScore,
+        questionHtml,
+        choices,
+        meta: {
+          planeShapeId: baseShape.id
+        }
+      };
+
+      q.postRender = () => {
+        const canvas = document.getElementById("planeShapeCanvas");
+        if (!canvas) return;
+        const def = PLANE_SHAPE_TYPES.find((s) => s.id === baseShape.id);
+        if (!def) return;
+        drawPlaneShape(canvas, def);
+      };
+
+      return q;
+    }
+
+    function drawPlaneShape(canvas, shapeDef) {
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.strokeStyle = "#333";
+      ctx.lineWidth = 3;
+      ctx.setLineDash([]);
+
+      if (shapeDef.kind === "point") {
+        ctx.beginPath();
+        ctx.arc(w / 2, h / 2, 4, 0, Math.PI * 2);
+        ctx.fillStyle = "#333";
+        ctx.fill();
+      } else if (shapeDef.kind === "line") {
+        ctx.beginPath();
+        ctx.moveTo(30, h - 40);
+        ctx.lineTo(w - 30, 40);
+        ctx.stroke();
+      } else if (shapeDef.kind === "circle") {
+        ctx.beginPath();
+        ctx.arc(w / 2, h / 2, 60, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (shapeDef.kind === "regularPolygon") {
+        drawRegularPolygon(ctx, w / 2, h / 2, 70, shapeDef.sides);
+      }
+    }
+
+    function drawRegularPolygon(ctx, cx, cy, r, sides) {
+      if (sides < 3) return;
+      ctx.beginPath();
+      for (let i = 0; i < sides; i++) {
+        const ang = (-Math.PI / 2) + (2 * Math.PI * i) / sides;
+        const x = cx + r * Math.cos(ang);
+        const y = cy + r * Math.sin(ang);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    // ============================================================
+    //  立体図形（かたち → 名前）
+    // ============================================================
+    function generateSolidShapeQuestion() {
+      const idx = Math.floor(Math.random() * SOLID_SHAPE_TYPES.length);
+      const base = SOLID_SHAPE_TYPES[idx];
+
+      const parentIds = base.parents || [];
+      const distractTypes = SOLID_SHAPE_TYPES.filter(
+        (t) => t.id !== base.id && !parentIds.includes(t.id)
+      );
+
+      shuffleArray(distractTypes);
+      const picked = distractTypes.slice(0, 3);
+      const allTypes = [base, ...picked];
+      shuffleArray(allTypes);
+
+      const choices = allTypes.map((def, i) => ({
+        id: "solid_" + i,
+        html: def.labelRuby || def.label,
+        correct: def.id === base.id
+      }));
+
+      const questionHtml =
+        `<div>` +
+        `<ruby>つぎ<rt>つぎ</rt></ruby>の ` +
+        `<ruby>立体<rt>りったい</rt></ruby>の ` +
+        `<ruby>名前<rt>なまえ</rt></ruby>を ` +
+        `<ruby>えらびましょう<rt>えらびましょう</rt></ruby>。</div>` +
+        `<canvas id="solidShapeCanvas" class="solid-canvas" width="220" height="220"></canvas>`;
+
+      const q = {
+        type: "mcq",
+        maxScore: CONFIG.baseMaxScore,
+        questionHtml,
+        choices,
+        meta: {
+          solidShapeId: base.id
+        }
+      };
+
+      q.postRender = () => {
+        const canvas = document.getElementById("solidShapeCanvas");
+        if (!canvas) return;
+        const def = SOLID_SHAPE_TYPES.find((s) => s.id === base.id);
+        if (!def) return;
+        drawSolidShape(canvas, def);
+      };
+
+      return q;
+    }
+
+    function drawSolidShape(canvas, shapeDef) {
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+
+      drawSolidShapeGeneric(ctx, w, h, shapeDef);
+    }
+
+    function drawSolidShapeGeneric(ctx, w, h, def) {
+      const cx = w / 2;
+      const cy = h / 2;
+      const visibleLineWidth = 2;
+      const hiddenLineWidth = 1.2;
+      const hiddenAlpha = 0.5;
+      const hiddenDash = [5, 4];
+
+      if (def.kind === "sphere") {
+        // 球：輪郭は実線，赤道を細い破線で
+        ctx.save();
+        ctx.strokeStyle = "#000";
+        ctx.fillStyle = "#e0e0e0";
+        ctx.lineWidth = visibleLineWidth;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 60, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.strokeStyle = "#000";
+        ctx.setLineDash(hiddenDash);
+        ctx.lineWidth = hiddenLineWidth;
+        ctx.globalAlpha = hiddenAlpha;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, 40, 60, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      } else if (def.kind === "cylinder") {
+        // 円柱：底の裏側を破線で
+        const rX = 60;
+        const rY = 12;
+        const topY = cy - 50;
+        const bottomY = cy + 50;
+
+        // 上のだ円（全部見えるとみなす）
+        ctx.save();
+        ctx.fillStyle = "#e0e0e0";
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = visibleLineWidth;
+        ctx.beginPath();
+        ctx.ellipse(cx, topY, rX, rY, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        // 側面の線
+        ctx.save();
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = visibleLineWidth;
+        ctx.beginPath();
+        ctx.moveTo(cx - rX, topY);
+        ctx.lineTo(cx - rX, bottomY);
+        ctx.moveTo(cx + rX, topY);
+        ctx.lineTo(cx + rX, bottomY);
+        ctx.stroke();
+        ctx.restore();
+
+        // 底の前側半分（実線）
+        ctx.save();
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = visibleLineWidth;
+        ctx.beginPath();
+        ctx.ellipse(cx, bottomY, rX, rY, 0, 0, Math.PI, false);
+        ctx.stroke();
+        ctx.restore();
+
+        // 底の後ろ側半分（破線）
+        ctx.save();
+        ctx.strokeStyle = "#000";
+        ctx.setLineDash(hiddenDash);
+        ctx.lineWidth = hiddenLineWidth;
+        ctx.globalAlpha = hiddenAlpha;
+        ctx.beginPath();
+        ctx.ellipse(cx, bottomY, rX, rY, 0, Math.PI, 2 * Math.PI, false);
+        ctx.stroke();
+        ctx.restore();
+      } else if (def.kind === "cone") {
+        // 円錐
+        const baseY = cy + 50;
+        const apexX = cx;
+        const apexY = cy - 60;
+        const rX = 60;
+        const rY = 10;
+
+        // 側面三角形（実線）
+        ctx.save();
+        ctx.fillStyle = "#e0e0e0";
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = visibleLineWidth;
+        ctx.beginPath();
+        ctx.moveTo(apexX, apexY);
+        ctx.lineTo(cx - rX, baseY);
+        ctx.lineTo(cx + rX, baseY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        // 底 前側半分（実線）
+        ctx.save();
+        ctx.strokeStyle = "#000";
+        ctx.lineWidth = visibleLineWidth;
+        ctx.beginPath();
+        ctx.ellipse(cx, baseY, rX, rY, 0, 0, Math.PI, false);
+        ctx.stroke();
+        ctx.restore();
+
+        // 底 後ろ側半分（破線）
+        ctx.save();
+        ctx.strokeStyle = "#000";
+        ctx.setLineDash(hiddenDash);
+        ctx.lineWidth = hiddenLineWidth;
+        ctx.globalAlpha = hiddenAlpha;
+        ctx.beginPath();
+        ctx.ellipse(cx, baseY, rX, rY, 0, Math.PI, 2 * Math.PI, false);
+        ctx.stroke();
+        ctx.restore();
+      } else if (def.kind === "prism") {
+        const sides = def.baseSides || 4;
+        const baseRadius = 45;
+        const frontCenter = { x: cx - 20, y: cy + 25 };
+        const offset = { x: 28, y: -28 };
+
+        // 正多角形を少し回転させて，どの辺も画面軸と平行にならないようにする
+        const front = buildRegularPolygonPoints(
+          frontCenter.x,
+          frontCenter.y,
+          baseRadius,
+          sides,
+          Math.PI / 6
+        );
+        const back = front.map((p) => ({
+          x: p.x + offset.x,
+          y: p.y + offset.y
+        }));
+
+        const avgY = front.reduce((sum, p) => sum + p.y, 0) / front.length;
+
+        // 側面（見える側）を塗る
+        ctx.save();
+        ctx.fillStyle = "#e0e0e0";
+        ctx.strokeStyle = "transparent";
+        ctx.lineWidth = 0;
+        for (let i = 0; i < sides; i++) {
+          const ni = (i + 1) % sides;
+          const f1 = front[i];
+          const f2 = front[ni];
+          const b1 = back[i];
+          const b2 = back[ni];
+          const midY = (f1.y + f2.y + b1.y + b2.y) / 4;
+          if (midY > avgY) {
+            ctx.beginPath();
+            ctx.moveTo(f1.x, f1.y);
+            ctx.lineTo(f2.x, f2.y);
+            ctx.lineTo(b2.x, b2.y);
+            ctx.lineTo(b1.x, b1.y);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+
+        // 前の多角形（塗りのみ）
+        ctx.save();
+        ctx.fillStyle = "#f5f5f5";
+        ctx.beginPath();
+        ctx.moveTo(front[0].x, front[0].y);
+        for (let i = 1; i < sides; i++) {
+          ctx.lineTo(front[i].x, front[i].y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // 奥の多角形（輪郭のみ・破線）
+        ctx.save();
+        ctx.strokeStyle = "#000";
+        ctx.setLineDash(hiddenDash);
+        ctx.lineWidth = hiddenLineWidth;
+        ctx.globalAlpha = hiddenAlpha;
+        strokePolygon(ctx, back);
+        ctx.restore();
+
+        // 側面の辺
+        for (let i = 0; i < sides; i++) {
+          const f = front[i];
+          const b = back[i];
+          const isBackEdge = f.y < avgY;
+          if (isBackEdge) {
+            ctx.save();
+            ctx.strokeStyle = "#000";
+            ctx.setLineDash(hiddenDash);
+            ctx.lineWidth = hiddenLineWidth;
+            ctx.globalAlpha = hiddenAlpha;
+            ctx.beginPath();
+            ctx.moveTo(f.x, f.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+            ctx.restore();
+          } else {
+            ctx.save();
+            ctx.strokeStyle = "#000";
+            ctx.setLineDash([]);
+            ctx.lineWidth = visibleLineWidth;
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.moveTo(f.x, f.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+
+        // 前面の多角形の辺（手前：実線，奥側：破線）
+        for (let i = 0; i < sides; i++) {
+          const ni = (i + 1) % sides;
+          const p1 = front[i];
+          const p2 = front[ni];
+          const isBackEdge =
+            p1.y < avgY && p2.y < avgY;
+
+          if (isBackEdge) {
+            ctx.save();
+            ctx.strokeStyle = "#000";
+            ctx.setLineDash(hiddenDash);
+            ctx.lineWidth = hiddenLineWidth;
+            ctx.globalAlpha = hiddenAlpha;
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+            ctx.restore();
+          } else {
+            ctx.save();
+            ctx.strokeStyle = "#000";
+            ctx.setLineDash([]);
+            ctx.lineWidth = visibleLineWidth;
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+      } else if (def.kind === "pyramid") {
+        const sides = def.baseSides || 4;
+        const baseRadius = 45;
+        const baseCenter = { x: cx, y: cy + 30 };
+        // 正多角形を少し回転させて，どの辺も画面軸と平行にならないようにする
+        const base = buildRegularPolygonPoints(
+          baseCenter.x,
+          baseCenter.y,
+          baseRadius,
+          sides,
+          Math.PI / 6
+        );
+        const apex = { x: cx + 10, y: cy - 55 };
+
+        const avgY =
+          base.reduce((sum, p) => sum + p.y, 0) / base.length;
+
+        // 側面（三角形）のうち，手前側にある面をすべて塗る
+        ctx.save();
+        ctx.fillStyle = "#e0e0e0";
+        ctx.strokeStyle = "transparent";
+        ctx.lineWidth = 0;
+        for (let i = 0; i < sides; i++) {
+          const ni = (i + 1) % sides;
+          const p1 = base[i];
+          const p2 = base[ni];
+          const midY = (apex.y + p1.y + p2.y) / 3;
+          if (midY > avgY) {
+            ctx.beginPath();
+            ctx.moveTo(apex.x, apex.y);
+            ctx.lineTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+
+        // 底面の辺：上側の辺を破線，下側を実線
+        for (let i = 0; i < sides; i++) {
+          const p1 = base[i];
+          const p2 = base[(i + 1) % sides];
+          const isBackEdge =
+            p1.y < avgY && p2.y < avgY; // 上にある辺を「奥」とみなす
+
+          if (isBackEdge) {
+            ctx.save();
+            ctx.strokeStyle = "#000";
+            ctx.setLineDash(hiddenDash);
+            ctx.lineWidth = hiddenLineWidth;
+            ctx.globalAlpha = hiddenAlpha;
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+            ctx.restore();
+          } else {
+            ctx.save();
+            ctx.strokeStyle = "#000";
+            ctx.setLineDash([]);
+            ctx.lineWidth = visibleLineWidth;
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
+
+        // 頂点からの辺：奥側は破線，手前は実線
+        base.forEach((p) => {
+          const isBackEdge = p.y < avgY;
+          if (isBackEdge) {
+            ctx.save();
+            ctx.strokeStyle = "#000";
+            ctx.setLineDash(hiddenDash);
+            ctx.lineWidth = hiddenLineWidth;
+            ctx.globalAlpha = hiddenAlpha;
+            ctx.beginPath();
+            ctx.moveTo(apex.x, apex.y);
+            ctx.lineTo(p.x, p.y);
+            ctx.stroke();
+            ctx.restore();
+          } else {
+            ctx.save();
+            ctx.strokeStyle = "#000";
+            ctx.setLineDash([]);
+            ctx.lineWidth = visibleLineWidth;
+            ctx.globalAlpha = 1;
+            ctx.beginPath();
+            ctx.moveTo(apex.x, apex.y);
+            ctx.lineTo(p.x, p.y);
+            ctx.stroke();
+            ctx.restore();
+          }
+        });
+      }
+    }
+
+    function buildRegularPolygonPoints(cx, cy, r, sides, angleOffset = 0) {
+      const pts = [];
+      for (let i = 0; i < sides; i++) {
+        const ang = (-Math.PI / 2 + angleOffset) + (2 * Math.PI * i) / sides;
+        pts.push({
+          x: cx + r * Math.cos(ang),
+          y: cy + r * Math.sin(ang)
+        });
+      }
+      return pts;
+    }
+
+    function strokePolygon(ctx, points) {
+      if (!points.length) return;
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
+
+    function fillPolygon(ctx, points) {
+      if (!points.length) return;
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].y);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // ============================================================
+    //  音名クイズ（abcjs で実装）
+    // ============================================================
+    function generateMusicQuestion() {
+      const idx = Math.floor(Math.random() * MUSIC_NOTES.length);
+      const note = MUSIC_NOTES[idx];
+
+      const allLetters = ["C", "D", "E", "F", "G", "A", "B"];
+      const others = allLetters.filter((l) => l !== note.letter);
+      shuffleArray(others);
+      const useLetters = [note.letter, ...others.slice(0, 3)];
+      shuffleArray(useLetters); // 正答が必ず含まれるようにした
+
+      const choices = useLetters.map((letter, i) => ({
+        id: "music_" + i,
+        html: letter,
+        correct: letter === note.letter
+      }));
+
+      const questionHtml =
+        `<div>` +
+        `<ruby>つぎ<rt>つぎ</rt></ruby>の ` +
+        `<ruby>おんぷ<rt>おんぷ</rt></ruby>の ` +
+        `アルファベットおんめいを ` +
+        `<ruby>えらびましょう<rt>えらびましょう</rt></ruby>。</div>` +
+        `<div id="musicNoteContainer" class="music-abc-container"></div>`;
+
+      const q = {
+        type: "mcq",
+        maxScore: CONFIG.baseMaxScore,
+        questionHtml,
+        choices,
+        meta: {
+          musicNote: note
+        },
+        correctSound: () => {
+          AudioEngine.playNoteByMidi(note.midi);
+        }
+      };
+
+      q.postRender = () => {
+        const containerId = "musicNoteContainer";
+        const el = document.getElementById(containerId);
+        if (!el || typeof ABCJS === "undefined") return;
+
+        // シンプルな 1 小節・4 分音符 1 音だけの ABC 記譜
+        const abcText =
+          "X:1\n" +
+          "L:1/4\n" +
+          "K:C clef=treble\n" +
+          note.abc + "\n";
+
+        ABCJS.renderAbc(containerId, abcText, {
+          responsive: "resize"
+        });
+      };
+
+      return q;
+    }
+
+    // ============================================================
+    //  mcq.csv からのインポート問題
+    // ============================================================
+    function generateImportMcqQuestion(sourceGroup) {
+      let targetGenres = [];
+
+      if (!appState.mcqLoaded || appState.mcqLoadError) {
+        return null;
+      }
+
+      if (!sourceGroup || sourceGroup === "import_mcq") {
+        targetGenres = Object.keys(appState.mcqByGenre);
+      } else if (sourceGroup === "japanese_from_mcq") {
+        const japSet = new Set([
+          "漢字の読み",
+          "漢字多肢選択",
+          "格助詞",
+          "助数詞",
+          "文脈からの単語"
+        ]);
+        targetGenres = Object.keys(appState.mcqByGenre).filter((g) =>
+          japSet.has(g)
+        );
+      } else if (sourceGroup === "colors_from_mcq") {
+        const colorSet = new Set(["色", "混色"]);
+        targetGenres = Object.keys(appState.mcqByGenre).filter((g) =>
+          colorSet.has(g)
+        );
+      }
+
+      if (!targetGenres.length) {
+        return null;
+      }
+
+      const gidx = Math.floor(Math.random() * targetGenres.length);
+      const genre = targetGenres[gidx];
+      const list = appState.mcqByGenre[genre];
+      if (!list || !list.length) return null;
+      const idx = Math.floor(Math.random() * list.length);
+      const item = list[idx];
+
+      const questionHtml =
+        `<div class="import-question">${item.questionHtml}</div>`;
+
+      const tmp = document.createElement("div");
+      tmp.innerHTML = item.choicesHtml;
+      const lis = tmp.querySelectorAll("li");
+      const choices = [];
+      lis.forEach((li, i) => {
+        const html = li.innerHTML;
+        const correct = (li.getAttribute("data-correct") || "") === "1";
+        choices.push({
+          id: "c" + i,
+          html,
+          correct
+        });
+      });
+      if (!choices.length) return null;
+
+      return {
+        type: "mcq",
+        maxScore: CONFIG.baseMaxScore * (item.scoreMultiplier || 1),
+        questionHtml,
+        choices
+      };
+    }
+
+    // ============================================================
+    //  回答 UI
+    // ============================================================
+    function renderAnswerUi(question) {
+      if (question.type === "digit-input") {
+        renderDigitInput(question);
+      } else if (question.type === "mcq") {
+        renderMcqChoices(question);
+      }
+    }
+
+    function renderMcqChoices(question) {
+      const list = document.createElement("div");
+      list.className = "choice-list";
+
+      question.choices.forEach((ch) => {
+        const btn = document.createElement("button");
+        btn.className = "choice-button";
+        btn.setAttribute("data-choice-id", ch.id);
+        btn.setAttribute("data-correct", ch.correct ? "1" : "0");
+
+        const labelSpan = document.createElement("span");
+        labelSpan.className = "choice-label";
+        labelSpan.innerHTML = ch.html;
+
+        const xmark = document.createElement("div");
+        xmark.className = "choice-x-mark";
+        xmark.textContent = "×";
+
+        btn.appendChild(labelSpan);
+        btn.appendChild(xmark);
+
+        btn.addEventListener("click", () => {
+          const correct = btn.getAttribute("data-correct") === "1";
+          if (btn.classList.contains("disabled")) return;
+          if (correct) {
+            handleCorrectAnswer(btn);
+          } else {
+            handleWrongAnswer(btn);
+          }
+        });
+
+        list.appendChild(btn);
+      });
+
+      dom.answerArea.appendChild(list);
+    }
+
+    // ============================================================
+    //  正答・誤答
+    // ============================================================
+    function handleCorrectAnswer(triggerElement) {
+      const q = appState.quiz.currentQuestion;
+      if (!q) return;
+
+      clearCorrectMessageTimers();
+
+      const gained = Math.max(
+        CONFIG.minScorePerQuestion,
+        Math.floor(appState.quiz.currentQuestionScore)
+      );
+      appState.quiz.totalScoreThisRun += gained;
+      appState.quiz.questionsAnswered += 1;
+
+      dom.correctOverlay.classList.add("active");
+
+      // 正答の丸の中心に「正解」を表示
+      if (dom.correctMessage) {
+        dom.correctMessage.classList.remove("blink");
+        dom.correctMessage.style.visibility = "visible";
+        dom.correctMessage.innerHTML =
+          '<ruby>正解<rt>せいかい</rt></ruby>';
+      }
+
+      if (triggerElement && triggerElement.classList.contains("choice-button")) {
+        triggerElement.classList.add("correct-flash");
+        setTimeout(() => {
+          triggerElement.classList.remove("correct-flash");
+          triggerElement.classList.add("correct-solid");
+        }, 2 * 100);
+      } else if (triggerElement && triggerElement.classList.contains("ok-button")) {
+        triggerElement.classList.add("correct-solid");
+      }
+
+      dom.scorePopup.textContent = `+${gained}`;
+      dom.scorePopup.classList.remove("active");
+      void dom.scorePopup.offsetWidth;
+      dom.scorePopup.classList.add("active");
+
+      if (q && typeof q.correctSound === "function") {
+        q.correctSound();
+      } else {
+        AudioEngine.playCorrect();
+      }
+
+      const buttons = dom.answerArea.querySelectorAll(".choice-button");
+      buttons.forEach((b) => {
+        if (b !== triggerElement) {
+          b.classList.add("disabled");
+        }
+      });
+
+      // 2 秒後に「正解」を消し，0.5 秒待ってから
+      // 「タッチして次へ」を 1 秒周期で点滅させる
+      if (dom.correctMessage) {
+        correctMessageTimeout1 = setTimeout(() => {
+          if (!dom.correctOverlay.classList.contains("active")) return;
+          dom.correctMessage.style.visibility = "hidden";
+
+          correctMessageTimeout2 = setTimeout(() => {
+            if (!dom.correctOverlay.classList.contains("active")) return;
+            dom.correctMessage.innerHTML =
+              '<ruby>タッチ<rt>たっち</rt></ruby>して<ruby>次<rt>つぎ</rt></ruby>へ';
+            dom.correctMessage.style.visibility = "visible";
+            dom.correctMessage.classList.add("blink");
+          }, 500);
+        }, 2000);
+      }
+
+      dom.nextTapOverlay.classList.add("active");
+      const onTap = () => {
+        dom.nextTapOverlay.classList.remove("active");
+        dom.correctOverlay.classList.remove("active");
+
+        if (dom.correctMessage) {
+          dom.correctMessage.classList.remove("blink");
+          dom.correctMessage.innerHTML = "";
+          dom.correctMessage.style.visibility = "visible";
+        }
+        clearCorrectMessageTimers();
+
+        if (appState.quiz.timeUp) {
+          endQuizToResult();
+        } else {
+          loadNextQuestion();
+        }
+      };
+      dom.nextTapOverlay.addEventListener("click", onTap, { once: true });
+    }
+
+    function handleWrongAnswer(triggerElement) {
+      if (triggerElement.classList.contains("disabled")) return;
+
+      triggerElement.classList.add("disabled");
+      triggerElement.style.background = "#f0f0f0";
+      triggerElement.style.color = "#888";
+
+      const xmark = triggerElement.querySelector(".choice-x-mark");
+      if (xmark) {
+        xmark.classList.add("visible");
+      }
+
+      const current = appState.quiz.currentQuestionScore;
+      const next = Math.max(
+        CONFIG.minScorePerQuestion,
+        Math.floor(current * CONFIG.wrongPenaltyFactor)
+      );
+      appState.quiz.currentQuestionScore = next;
+
+      AudioEngine.playWrong();
+    }
+
+    // ============================================================
+    //  ユーティリティ
+    // ============================================================
+    function shuffleArray(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = arr[i];
+        arr[i] = arr[j];
+        arr[j] = tmp;
+      }
+    }
+
+    // ============================================================
+    //  イベント設定
+    // ============================================================
+    function setupEventHandlers() {
+      dom.startQuizButton.addEventListener("click", () => {
+        startQuiz();
+      });
+
+      dom.buttonSettingsBack.addEventListener("click", () => {
+        leaveSettingsToTitle();
+      });
+
+      dom.retryButton.addEventListener("click", () => {
+        startQuiz();
+      });
+
+      dom.resultToTitleButton.addEventListener("click", () => {
+        showScreen("title");
+      });
+
+      const toggles = document.querySelectorAll(".toggle");
+      toggles.forEach((tg) => {
+        tg.addEventListener("click", () => {
+          tg.classList.toggle("on");
+        });
+      });
+    }
+
+    // ============================================================
+    //  初期化
+    // ============================================================
+    function init() {
+      cacheDom();
+      loadDailyScore();
+      loadSettings();
+      applySettingsToInputs();
+      updateDailyScoreDisplay();
+      updateTitleWarnings();
+      setupEventHandlers();
+      loadMcqCsv();
+      showScreen("title");
+    }
+
+    document.addEventListener("DOMContentLoaded", init);
+  </script>
+</body>
+</html>
