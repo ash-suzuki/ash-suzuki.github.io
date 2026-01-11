@@ -32,12 +32,12 @@
         - 一桁の加法減法
         - 二桁どうしの加法減法（筆算）
         - 平面図形（図形 → 図形名 １つ選択）
-        - 立体図形（立体図形 → 図形名 １つ選択）
-        - 音名クイズ（ト音記号，アルファベット音名）
+        - 立体図形（立体図形 → 図形名 １つ選択）※実験的：デフォルト OFF
+        - 音名クイズ（ト音記号 A3〜C6，ヘ音記号 C2〜E4，アルファベット音名）
 
       [mcq.csv（インポート）]
-        - 漢字の読み／漢字多肢選択／格助詞／助数詞／文脈からの単語
-        - 色／混色／一般知識 など。
+        - mcq.csv 内に含まれる genre ごとに ON / OFF を切り替え可能
+          （漢字の読み／漢字多肢選択／格助詞／助数詞／文脈からの単語／色／混色 など）
 
     ■ 図形描画
       - 平面図形：PLANE_SHAPE_TYPES に定義した情報から
@@ -73,6 +73,11 @@
         * その問題の全ての選択肢が 1 文字のときだけ，
           文中の空欄に 「□」 を用いる。
         * それ以外のときは，「＿＿」（二文字分の下線）を用いる。
+      - choices_html には 5 個以上の <li> を含めてもよい。
+        （出題時には正答を必ず含めて 4 個までに自動で間引かれる）
+
+      詳細仕様は，JavaScript 内の
+      「mcq.csv の詳細仕様」コメントを参照してください。
     ============================================================
   -->
 
@@ -94,7 +99,7 @@
       --screen-fade-ms: 220ms;
       --choice-flash-ms: 100ms;
       --hint-blink-ms: 800ms;
-      --score-float-ms: 900ms;
+      --score-float-ms: 1600ms;
 
       --timer-height: 6px;
 
@@ -105,7 +110,6 @@
       --line-height-ruby: 1.8;
       --font-family: "UD Digi Kyokasho N";
 
-      /* 問題文・選択肢で優先的に使うフォント */
       --quiz-font-family:
         "Helvetica Neue",
         Arial,
@@ -504,28 +508,35 @@
       background: #fff9e0;
     }
 
+    /* 正答時の得点ポップアップ（より目立つ色・透明度・長めの表示） */
     .score-popup {
       position: fixed;
       left: 50%;
-      top: 60%;
+      top: 55%;
       transform: translate(-50%, -50%);
-      font-size: 28px;
+      font-size: 32px;
       font-weight: bold;
       font-family: "Yu Gothic", "Meiryo", sans-serif;
-      background: linear-gradient(135deg, #fff59d, #ffca28);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
-      text-shadow: 0 0 6px rgba(255,255,255,0.8);
+      padding: 6px 16px;
+/*      border-radius: 999px;*/
+/*      background: linear-gradient(135deg, #ff1744, #ff9100);*/
+/*      color: #ffffff;*/
+      color: rgba(192, 23, 68, 0.5);
+/*      box-shadow:
+        0 0 16px rgba(255, 23, 68, 0.9),
+        0 0 30px rgba(255, 145, 0, 0.8);
+      border: 2px solid rgba(255, 255, 255, 0.9);
+*/
       pointer-events: none;
-      opacity: 0;
+      opacity: 0.3;
       z-index: 70;
     }
 
     @keyframes score-float {
       0%   { transform: translate(-50%, 0); opacity: 0; }
-      15%  { opacity: 1; }
-      100% { transform: translate(-50%, -60px); opacity: 0; }
+      10%  { opacity: 1; }
+      70%  { opacity: 1; }
+      100% { transform: translate(-50%, -70px); opacity: 0; }
     }
     .score-popup.active {
       animation: score-float var(--score-float-ms) ease-out forwards;
@@ -720,13 +731,41 @@
     .result-sub {
       font-size: 14px;
       color: #555;
+      max-width: 90%;
+    }
+
+    /* 結果画面で「今日の合計得点」を目立たせる */
+    .result-today {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      font-size: 16px;
+      margin-top: -4px;
+    }
+    .result-today-number {
+      font-size: 24px;
+      font-weight: bold;
+      color: #1976d2;
+      padding: 4px 14px;
+      border-radius: 999px;
+      background: rgba(25, 118, 210, 0.08);
+      border: 1px solid rgba(25, 118, 210, 0.3);
+    }
+
+    /* 結果画面のボタン間に余白を設ける */
+    .result-buttons {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-top: 8px;
     }
 
     ruby {
       ruby-position: over;
     }
     rt {
-      font-size: 0.5em;  /* ふりがなはかなり小さめに */
+      font-size: 0.5em;
       line-height: 1;
     }
 
@@ -752,14 +791,37 @@
       border: 1px solid #c5cae9;
     }
 
-    /* abcjs で描画する音楽用コンテナ */
+    /* 楽譜表示用コンテナ（従来の 2 倍以上の大きさに） */
     .music-abc-container {
       display: block;
-      margin: 8px auto 0 auto;
+      margin: 12px auto 0 auto;
       background: #ffffff;
       border-radius: 12px;
       border: 1px solid #c5cae9;
-      padding: 8px;
+      padding: 16px;
+      min-height: 160px;
+      width: 100%;
+      overflow: visible;
+    }
+
+    /* 音名クイズ用：横一列に C〜B を並べる */
+    .music-choice-list {
+      flex-direction: row;
+      flex-wrap: nowrap;
+      justify-content: space-between;
+    }
+    .music-choice-list .choice-button {
+      flex: 1 1 auto;
+      justify-content: center;
+      text-align: center;
+      padding: 10px 4px;
+    }
+
+    /* 出題部分を強調するためのクラス（ふりがなも含めて大きく太字・赤字） */
+    .quiz-highlight {
+      font-size: 1.5em;
+      font-weight: bold;
+      color: #d32f2f;
     }
 
     ::-webkit-scrollbar {
@@ -857,6 +919,14 @@
             </span>
           </div>
         </div>
+        <div class="settings-row">
+          <label>
+            <ruby>制限<rt>せいげん</rt></ruby>
+            <ruby>時間<rt>じかん</rt></ruby>の
+            <ruby>表示<rt>ひょうじ</rt></ruby>
+          </label>
+          <div class="toggle" data-setting-id="show_timer"></div>
+        </div>
       </section>
 
       <section class="settings-section">
@@ -904,46 +974,38 @@
             <ruby>立体<rt>りったい</rt></ruby>
             <ruby>図形<rt>ずけい</rt></ruby>
             （かたち→なまえ）
+            <span style="font-size:11px;color:#888;">※
+              <ruby>実験<rt>じっけん</rt></ruby>モード
+            </span>
           </label>
-          <div class="toggle on" data-genre-id="solid_shapes"></div>
+          <div class="toggle" data-genre-id="solid_shapes"></div>
         </div>
 
         <div class="settings-row">
           <label>
             <ruby>音<rt>おと</rt></ruby>の
             <ruby>名前<rt>なまえ</rt></ruby>
-            （ト音記号・アルファベット音名）
+            （ト音記号・ヘ音記号・アルファベット音名）
           </label>
           <div class="toggle on" data-genre-id="music_all"></div>
         </div>
+      </section>
 
-        <div class="settings-row">
-          <label>
-            mcq.csv からの
-            <ruby>インポート<rt>いんぽーと</rt></ruby>
-            <ruby>問題<rt>もんだい</rt></ruby>
-            （すべて）
-          </label>
-          <div class="toggle on" data-genre-id="import_mcq"></div>
+      <section class="settings-section">
+        <div class="settings-section-title">
+          mcq.csv からの
+          <ruby>ジャンル<rt>じゃんる</rt></ruby>ごとの
+          <ruby>出題<rt>しゅつだい</rt></ruby> ON / OFF
         </div>
-
-        <div class="settings-row">
-          <label>
-            <ruby>国語<rt>こくご</rt></ruby>
-            （mcqから：
-            <ruby>漢字<rt>かんじ</rt></ruby>・
-            <ruby>文法<rt>ぶんぽう</rt></ruby> など）
-          </label>
-          <div class="toggle on" data-genre-id="japanese_from_mcq"></div>
-        </div>
-
-        <div class="settings-row">
-          <label>
-            <ruby>色<rt>いろ</rt></ruby>・
-            <ruby>混色<rt>こんしょく</rt></ruby>
-            （mcqから）
-          </label>
-          <div class="toggle on" data-genre-id="colors_from_mcq"></div>
+        <div id="mcqGenreSettingsContainer">
+          <div class="settings-row">
+            <span style="font-size:13px;color:#666;">
+              mcq.csv を
+              <ruby>読<rt>よ</rt></ruby>み
+              <ruby>込<rt>こ</rt></ruby>み
+              <ruby>中<rt>ちゅう</rt></ruby>です…
+            </span>
+          </div>
         </div>
       </section>
 
@@ -981,15 +1043,21 @@
         <ruby>発表<rt>はっぴょう</rt></ruby>
       </div>
       <div class="result-score" id="resultScore">0</div>
+      <div class="result-today" id="resultTodayScoreBox">
+        <div>
+          <ruby>今日<rt>きょう</rt></ruby>の
+          <ruby>合計<rt>ごうけい</rt></ruby>
+          <ruby>得点<rt>とくてん</rt></ruby>
+        </div>
+        <div class="result-today-number" id="resultTodayScore">0</div>
+      </div>
       <div class="result-sub" id="resultSub"></div>
 
-      <div>
+      <div class="result-buttons">
         <button class="start-button" id="retryButton">
           もういちど
           <ruby>チャレンジ<rt>ちゃれんじ</rt></ruby>
         </button>
-      </div>
-      <div>
         <button class="icon-button" id="resultToTitleButton">
           <span>
             <ruby>タイトル<rt>たいとる</rt></ruby>にもどる
@@ -1016,12 +1084,12 @@
     // ============================================================
     const CONFIG = {
       defaultDurationSeconds: 120,
-      baseMaxScore: 10,
+      baseMaxScore: 12,              // デフォルト満点を 12 点に
       wrongPenaltyFactor: 0.5,
       minScorePerQuestion: 1,
       timerIntervalMs: 250,
       storageDailyScoreKey: "quiz_daily_score_v1",
-      storageSettingsKey: "quiz_settings_v1",
+      storageSettingsKey: "quiz_settings_v2", // mcq設定などを含むため v2
       audioMasterGain: 0.15
     };
 
@@ -1030,6 +1098,69 @@
       E6: 1318.51,
       C6: 1046.50,
       C2: 65.41
+    };
+
+    // ============================================================
+    //  音名クイズ用：音高の定義
+    //
+    //  - ト音記号 clef=treble: A3 (57) 〜 C6 (84) のうち，
+    //    C, D, E, F, G, A, B のみ。
+    //  - ヘ音記号 clef=bass  : C2 (36) 〜 E4 (64) のうち，
+    //    C, D, E, F, G, A, B のみ。
+    //  - 選択肢は常に C, D, E, F, G, A, B の 7 つ（オクターブは問わない）。
+    // ============================================================
+    const NOTE_LETTER_TO_SEMITONE = {
+      C: 0,
+      D: 2,
+      E: 4,
+      F: 5,
+      G: 7,
+      A: 9,
+      B: 11
+    };
+
+    function midiFromLetterOct(letter, octave) {
+      return (octave + 1) * 12 + NOTE_LETTER_TO_SEMITONE[letter];
+    }
+
+    function abcFromLetterOct(letter, octave) {
+      const upper = letter.toUpperCase();
+      const lower = letter.toLowerCase();
+      if (octave <= 4) {
+        const commaCount = 4 - octave;
+        return upper + ",".repeat(commaCount);
+      } else {
+        const apostropheCount = Math.max(0, octave - 5);
+        return lower + "'".repeat(apostropheCount);
+      }
+    }
+
+    const TREBLE_MIN_MIDI = midiFromLetterOct("A", 3); // A3
+    const TREBLE_MAX_MIDI = midiFromLetterOct("C", 6); // C6
+    const BASS_MIN_MIDI = midiFromLetterOct("C", 2);   // C2
+    const BASS_MAX_MIDI = midiFromLetterOct("E", 4);   // E4
+
+    function buildMusicNotesForClef(clef, minMidi, maxMidi) {
+      const notes = [];
+      for (let octave = 0; octave <= 7; octave++) {
+        for (const letter of ["C", "D", "E", "F", "G", "A", "B"]) {
+          const midi = midiFromLetterOct(letter, octave);
+          if (midi < minMidi || midi > maxMidi) continue;
+          const abc = abcFromLetterOct(letter, octave);
+          notes.push({
+            midi,
+            letter,
+            abc,
+            clef
+          });
+        }
+      }
+      return notes;
+    }
+
+    const MUSIC_NOTES = {
+      treble: buildMusicNotesForClef("treble", TREBLE_MIN_MIDI, TREBLE_MAX_MIDI),
+      bass: buildMusicNotesForClef("bass", BASS_MIN_MIDI, BASS_MAX_MIDI)
     };
 
     // 平面図形（図形 → 名前）用
@@ -1054,19 +1185,7 @@
       { id: "rect_pyramid", label: "四角錐", labelRuby: "<ruby>四角錐<rt>しかくすい</rt></ruby>", kind: "pyramid", baseSides: 4, parents: [] },
       { id: "tri_prism", label: "三角柱", labelRuby: "<ruby>三角柱<rt>さんかくちゅう</rt></ruby>", kind: "prism", baseSides: 3, parents: [] },
       { id: "rect_prism", label: "四角柱", labelRuby: "<ruby>四角柱<rt>しかくちゅう</rt></ruby>", kind: "prism", baseSides: 4, parents: [] },
-      // 立方体は四角柱の下位カテゴリ
       { id: "cube", label: "立方体", labelRuby: "<ruby>立方体<rt>りっぽうたい</rt></ruby>", kind: "prism", baseSides: 4, isCube: true, parents: ["rect_prism"] }
-    ];
-
-    // 音名クイズ用（C4〜B4）／abcjs 用の ABC 記法も付与
-    const MUSIC_NOTES = [
-      { midi: 60, letter: "C", abc: "C" },
-      { midi: 62, letter: "D", abc: "D" },
-      { midi: 64, letter: "E", abc: "E" },
-      { midi: 65, letter: "F", abc: "F" },
-      { midi: 67, letter: "G", abc: "G" },
-      { midi: 69, letter: "A", abc: "A" },
-      { midi: 71, letter: "B", abc: "B" }
     ];
 
     // ============================================================
@@ -1139,16 +1258,16 @@
       mode: "title",
       settings: {
         durationSeconds: CONFIG.defaultDurationSeconds,
+        showTimer: false, // デフォルトでは制限時間非表示
         genres: {
           arith_1digit: true,
           arith_2digit_column: true,
           plane_shapes: true,
-          solid_shapes: true,
-          music_all: true,
-          import_mcq: true,
-          japanese_from_mcq: true,
-          colors_from_mcq: true
-        }
+          solid_shapes: false, // 実験的：デフォルト OFF
+          music_all: true
+        },
+        // mcq.csv 内の genre ごとの ON / OFF（初期値はロード時に true で埋める）
+        mcqGenres: {}
       },
       dailyScore: {
         date: null,
@@ -1166,13 +1285,14 @@
         totalScoreThisRun: 0,
         questionsAnswered: 0,
         currentQuestion: null,
-        currentQuestionScore: 0
+        currentQuestionScore: 0,
+        genreCycle: [],
+        genreIndex: 0
       }
     };
 
     const dom = {};
 
-    // 正解オーバーレイ用のタイマー管理
     let correctMessageTimeout1 = null;
     let correctMessageTimeout2 = null;
 
@@ -1204,11 +1324,13 @@
 
       dom.timerBar = document.getElementById("timerBar");
       dom.timerSeconds = document.getElementById("timerSeconds");
+
       dom.questionText = document.getElementById("questionText");
       dom.answerArea = document.getElementById("answerArea");
 
       dom.resultScore = document.getElementById("resultScore");
       dom.resultSub = document.getElementById("resultSub");
+      dom.resultTodayScore = document.getElementById("resultTodayScore");
       dom.retryButton = document.getElementById("retryButton");
       dom.resultToTitleButton = document.getElementById("resultToTitleButton");
 
@@ -1216,6 +1338,8 @@
       dom.correctMessage = document.getElementById("correctMessage");
       dom.nextTapOverlay = document.getElementById("nextTapOverlay");
       dom.scorePopup = document.getElementById("scorePopup");
+
+      dom.mcqGenreSettingsContainer = document.getElementById("mcqGenreSettingsContainer");
     }
 
     // ============================================================
@@ -1284,12 +1408,18 @@
             Math.min(999, Math.round(data.durationSeconds))
           );
         }
+        if (typeof data.showTimer === "boolean") {
+          appState.settings.showTimer = data.showTimer;
+        }
         if (data.genres && typeof data.genres === "object") {
           for (const k in appState.settings.genres) {
             if (Object.prototype.hasOwnProperty.call(data.genres, k)) {
               appState.settings.genres[k] = !!data.genres[k];
             }
           }
+        }
+        if (data.mcqGenres && typeof data.mcqGenres === "object") {
+          appState.settings.mcqGenres = { ...data.mcqGenres };
         }
       } catch {}
     }
@@ -1298,7 +1428,9 @@
       const key = CONFIG.storageSettingsKey;
       const payload = {
         durationSeconds: appState.settings.durationSeconds,
-        genres: appState.settings.genres
+        showTimer: appState.settings.showTimer,
+        genres: appState.settings.genres,
+        mcqGenres: appState.settings.mcqGenres
       };
       try {
         localStorage.setItem(key, JSON.stringify(payload));
@@ -1371,11 +1503,29 @@
 
     function applySettingsToInputs() {
       dom.inputDuration.value = appState.settings.durationSeconds;
-      const toggles = document.querySelectorAll(".toggle");
-      toggles.forEach((tg) => {
+
+      const timerToggle = document.querySelector('.toggle[data-setting-id="show_timer"]');
+      if (timerToggle) {
+        timerToggle.classList.toggle("on", !!appState.settings.showTimer);
+      }
+
+      const genreToggles = document.querySelectorAll(".toggle[data-genre-id]");
+      genreToggles.forEach((tg) => {
         const id = tg.getAttribute("data-genre-id");
         if (!id) return;
         const v = !!appState.settings.genres[id];
+        tg.classList.toggle("on", v);
+      });
+
+      const mcqToggles = document.querySelectorAll(".toggle[data-mcq-genre]");
+      mcqToggles.forEach((tg) => {
+        const g = tg.getAttribute("data-mcq-genre");
+        if (!g) return;
+        const v =
+          appState.settings.mcqGenres &&
+          Object.prototype.hasOwnProperty.call(appState.settings.mcqGenres, g)
+            ? !!appState.settings.mcqGenres[g]
+            : true;
         tg.classList.toggle("on", v);
       });
     }
@@ -1386,13 +1536,27 @@
       sec = Math.max(10, Math.min(999, sec));
       appState.settings.durationSeconds = sec;
 
-      const toggles = document.querySelectorAll(".toggle");
-      toggles.forEach((tg) => {
+      const timerToggle = document.querySelector('.toggle[data-setting-id="show_timer"]');
+      appState.settings.showTimer = timerToggle
+        ? timerToggle.classList.contains("on")
+        : false;
+
+      const genreToggles = document.querySelectorAll(".toggle[data-genre-id]");
+      genreToggles.forEach((tg) => {
         const id = tg.getAttribute("data-genre-id");
         if (!id) return;
         const on = tg.classList.contains("on");
         appState.settings.genres[id] = on;
       });
+
+      const mcqToggles = document.querySelectorAll(".toggle[data-mcq-genre]");
+      const newMcq = {};
+      mcqToggles.forEach((tg) => {
+        const g = tg.getAttribute("data-mcq-genre");
+        if (!g) return;
+        newMcq[g] = tg.classList.contains("on");
+      });
+      appState.settings.mcqGenres = newMcq;
     }
 
     function updateTitleWarnings() {
@@ -1425,6 +1589,122 @@
         dom.titleWarningArea.appendChild(div);
       }
     }
+
+    // ============================================================
+    //  mcq.csv の詳細仕様
+    // ============================================================
+    /*
+      mcq.csv の仕様（2026-01-10 時点）
+
+      【1. ファイル形式】
+        - 文字コードは UTF-8（BOM 無し推奨）。
+        - 1 行目はヘッダ行とし，以下の 4 カラムをこの順で持つ。
+
+            genre, question_html, choices_html, score_multiplier
+
+          ※カラム名は上記と完全一致させること（順番も固定）。
+
+      【2. 各カラムの意味】
+
+        (1) genre
+            - 文字列（例：「漢字の読み」「漢字多肢選択」「格助詞」「色」など）。
+            - この文字列が「ジャンル名」として扱われる。
+            - アプリ起動後，mcq.csv の読み込みが完了すると，
+              設定画面の「mcq.csv からのジャンルごとの出題」のところに，
+              読み込まれた genre ごとに ON / OFF トグルが自動生成される。
+            - ON のジャンルのみ，出題候補として利用される。
+
+        (2) question_html
+            - 問題文部分を構成する HTML 文字列。
+            - このまま <div class="import-question"> の innerHTML として埋め込まれる。
+            - ルート要素は自由だが，多くの場合，
+              <div class='import-question'>…</div> の中身とすることを想定。
+            - ひらがなのみの語には <ruby> は付けない。
+            - 「漢字の読み」を問う問題では，
+              出題対象となる漢字（例：「犬」）には <ruby> / <rt> を付けない。
+              それ以外の漢字には，できるだけ <ruby> / <rt> でふりがなを付ける。
+            - 文中の空欄は，下記のルールで記述する。
+                * 選択肢がすべて 1 文字のときだけ「□」を用いる。
+                * それ以外のときは「＿＿」を用いる。
+            - 出題部分をより強調したい場合は，
+              <span class="quiz-highlight">…</span> で囲むと，
+              ふりがなも含めて大きな太字の赤色で表示される。
+
+        (3) choices_html
+            - 選択肢部分を構成する HTML 文字列。
+            - 基本形は次のような構造とする。
+
+              <ul class="mcq-choices">
+                <li data-correct="1">正しい選択肢の HTML</li>
+                <li data-correct="0">誤った選択肢 1</li>
+                <li data-correct="0">誤った選択肢 2</li>
+                …
+              </ul>
+
+            - この <ul> / <li> 構造そのものを choices_html として csv に格納する。
+            - <li> 要素は 4 個までに限らない。5 個以上あってもよい。
+              アプリ側は，内部でいったんすべての <li> を読み込み，
+              正答を必ず含む形で最大 4 個までに自動で間引いて表示する。
+                例: <li> が 6 個ある場合
+                    → そのうち 1 個以上の正答を必ず含めて，
+                      合計 4 個だけをランダムに選んで出題。
+            - data-correct 属性:
+                * "1" … 正答
+                * "0" … 誤答
+              を必ず付与すること。
+              正答が複数個あってもよい（選ばれた正答はすべて正解扱い）。
+            - <li> の innerHTML に <ruby> を含めてもよい。
+              ひらがなのみの語には <ruby> は付けない。
+
+        (4) score_multiplier
+            - その問題の得点倍率を表す数値（例: 1, 1.5, 2 など）。
+            - 省略・空欄の場合やパースに失敗した場合は 1 とみなす。
+            - 実際の満点は，
+                CONFIG.baseMaxScore（=12） × score_multiplier
+              で計算される。
+
+      【3. 出題時の処理】
+
+        - ジャンルの ON / OFF
+            * 設定画面で ON になっている genre のみが，
+              mcq 由来の出題候補として利用される。
+            * 各 genre は内部的に "mcq:<genre名>" という ID で
+              他ジャンルと同列に扱われる。
+
+        - 選択肢の間引き（5 個以上ある場合）
+            1) choices_html 内のすべての <li> を読み込み，
+               data-correct="1" のものを「正答リスト」，
+               data-correct="0" のものを「誤答リスト」として分ける。
+            2) 正答リストから 1 つをランダムに選び，必ず採用する。
+               （正答が 1 つしかない場合はそれが採用される）
+            3) 残りの枠（最大 3 枠）について，
+               「残りの正答」と「誤答」を合わせた集合からランダムに選び，
+               重複しないように追加する。
+            4) 4 個より少ない場合（<li> の総数が 3 以下など）は，
+               あるものをすべて利用する。
+            5) 最後に，採用した選択肢 2〜4 個をランダム順に並べ替えて表示する。
+
+        - 得点
+            * 1 問の理論上の満点:
+                CONFIG.baseMaxScore（=12） × score_multiplier
+            * 誤答するたびに，
+                currentScore = floor(currentScore × wrongPenaltyFactor)
+              となり，最低でも CONFIG.minScorePerQuestion（=1）点を下回らない。
+            * 正答した時点で currentScore が加算される。
+
+      【4. ふりがなと空欄のルール（再掲）】
+
+        - ひらがなだけの語には <ruby> は付けない。
+        - 「漢字の読み」ジャンルでは，
+          問われている漢字（犬・山 など）には <ruby> を付けない。
+          それ以外の漢字にはできるだけ <ruby> / <rt> でふりがなを付ける。
+        - 空欄記号:
+            * 選択肢がすべて 1 文字のときだけ「□」を用いる。
+            * それ以外（選択肢に 2 文字以上のものがある場合を含む）は
+              「＿＿」を用いる。
+
+      以上の仕様を守ることで，このアプリに mcq.csv を安全にインポートできます。
+    */
 
     // ============================================================
     //  CSV 読み込み
@@ -1472,6 +1752,47 @@
       return rows;
     }
 
+    function buildMcqGenreToggles() {
+      if (!dom.mcqGenreSettingsContainer) return;
+      dom.mcqGenreSettingsContainer.innerHTML = "";
+
+      const genres = Object.keys(appState.mcqByGenre);
+      if (!genres.length) {
+        const row = document.createElement("div");
+        row.className = "settings-row";
+        row.innerHTML =
+          '<span style="font-size:13px;color:#666;">mcq.csv に ' +
+          '<ruby>有効<rt>ゆうこう</rt></ruby>な ' +
+          '<ruby>問題<rt>もんだい</rt></ruby>が ' +
+          '<ruby>見<rt>み</rt></ruby>つかりませんでした。</span>';
+        dom.mcqGenreSettingsContainer.appendChild(row);
+        return;
+      }
+
+      genres.sort();
+      genres.forEach((g) => {
+        if (!Object.prototype.hasOwnProperty.call(appState.settings.mcqGenres, g)) {
+          appState.settings.mcqGenres[g] = true;
+        }
+        const row = document.createElement("div");
+        row.className = "settings-row";
+
+        const label = document.createElement("label");
+        label.textContent = g;
+
+        const toggle = document.createElement("div");
+        toggle.className = "toggle";
+        toggle.setAttribute("data-mcq-genre", g);
+        if (appState.settings.mcqGenres[g]) {
+          toggle.classList.add("on");
+        }
+
+        row.appendChild(label);
+        row.appendChild(toggle);
+        dom.mcqGenreSettingsContainer.appendChild(row);
+      });
+    }
+
     function loadMcqCsv() {
       fetch("mcq.csv")
         .then((res) => {
@@ -1506,6 +1827,9 @@
             });
           }
           appState.mcqLoaded = true;
+
+          buildMcqGenreToggles();
+          applySettingsToInputs();
           updateTitleWarnings();
         })
         .catch(() => {
@@ -1528,6 +1852,8 @@
       appState.quiz.questionsAnswered = 0;
       appState.quiz.currentQuestion = null;
       appState.quiz.currentQuestionScore = 0;
+      appState.quiz.genreCycle = [];
+      appState.quiz.genreIndex = 0;
 
       if (appState.quiz.timerId !== null) {
         clearInterval(appState.quiz.timerId);
@@ -1540,8 +1866,18 @@
         "linear-gradient(to right, #66bb6a, #ffb300)";
     }
 
+    function applyTimerVisibility() {
+      const visible = !!appState.settings.showTimer;
+      const wrapper = document.querySelector(".timer-bar-wrapper");
+      const label = document.querySelector(".timer-label");
+      if (wrapper) wrapper.style.display = visible ? "block" : "none";
+      if (label) label.style.display = visible ? "block" : "none";
+    }
+
     function startQuiz() {
       resetQuizState();
+      rebuildGenreCycle();
+
       appState.quiz.running = true;
       appState.quiz.startTimestamp = performance.now();
       appState.quiz.timeUp = false;
@@ -1579,6 +1915,7 @@
       }, CONFIG.timerIntervalMs);
 
       showScreen("quiz");
+      applyTimerVisibility();
       loadNextQuestion();
     }
 
@@ -1605,6 +1942,7 @@
       dom.resultScore.textContent = appState.quiz.totalScoreThisRun;
       dom.resultSub.textContent =
         `全問あわせて ${appState.quiz.questionsAnswered} 問 ときました。`;
+      dom.resultTodayScore.textContent = appState.dailyScore.score;
 
       showScreen("result");
 
@@ -1618,36 +1956,56 @@
       }, 1000);
     }
 
-    function getActiveGenres() {
+    // 現在 ON のジャンル（生成系 + mcq 系）をまとめて取得
+    function getEnabledGenres() {
+      const result = [];
       const g = appState.settings.genres;
-      const all = [];
-      if (g.arith_1digit) all.push("arith_1digit");
-      if (g.arith_2digit_column) all.push("arith_2digit_column");
-      if (g.plane_shapes) all.push("plane_shapes");
-      if (g.solid_shapes) all.push("solid_shapes");
-      if (g.music_all) all.push("music_all");
-      if (g.import_mcq) all.push("import_mcq");
-      if (g.japanese_from_mcq) all.push("japanese_from_mcq");
-      if (g.colors_from_mcq) all.push("colors_from_mcq");
-      return all;
-    }
+      if (g.arith_1digit) result.push("arith_1digit");
+      if (g.arith_2digit_column) result.push("arith_2digit_column");
+      if (g.plane_shapes) result.push("plane_shapes");
+      if (g.solid_shapes) result.push("solid_shapes");
+      if (g.music_all) result.push("music_all");
 
-    function getGenresForThisRun() {
-      let active = getActiveGenres();
-      if (!active.length) {
-        for (const k in appState.settings.genres) {
-          appState.settings.genres[k] = true;
+      if (appState.mcqLoaded && !appState.mcqLoadError) {
+        for (const genreName of Object.keys(appState.mcqByGenre)) {
+          const enabled =
+            appState.settings.mcqGenres &&
+            Object.prototype.hasOwnProperty.call(appState.settings.mcqGenres, genreName)
+              ? !!appState.settings.mcqGenres[genreName]
+              : true;
+          if (!enabled) continue;
+          if (!appState.mcqByGenre[genreName] || !appState.mcqByGenre[genreName].length) continue;
+          result.push("mcq:" + genreName);
         }
-        active = getActiveGenres();
       }
-      return active;
+      return result;
     }
 
-    function chooseGenreForQuestion() {
-      const genres = getGenresForThisRun();
-      if (!genres.length) return "arith_1digit";
-      const idx = Math.floor(Math.random() * genres.length);
-      return genres[idx];
+    // すべての出題ジャンルが一周するまで同じジャンルが出ないようにするサイクル生成
+    function rebuildGenreCycle() {
+      let genres = getEnabledGenres();
+      if (!genres.length) {
+        // 何も ON でないときは，一桁の加減算だけを強制 ON
+        appState.settings.genres.arith_1digit = true;
+        genres = ["arith_1digit"];
+      }
+      const arr = genres.slice();
+      shuffleArray(arr);
+      appState.quiz.genreCycle = arr;
+      appState.quiz.genreIndex = 0;
+    }
+
+    function getNextGenreInCycle() {
+      if (
+        !appState.quiz.genreCycle ||
+        !appState.quiz.genreCycle.length ||
+        appState.quiz.genreIndex >= appState.quiz.genreCycle.length
+      ) {
+        rebuildGenreCycle();
+      }
+      const g = appState.quiz.genreCycle[appState.quiz.genreIndex];
+      appState.quiz.genreIndex += 1;
+      return g;
     }
 
     function loadNextQuestion() {
@@ -1666,7 +2024,7 @@
       dom.answerArea.innerHTML = "";
       dom.questionText.innerHTML = "";
 
-      const genre = chooseGenreForQuestion();
+      const genre = getNextGenreInCycle();
       let q = null;
 
       if (genre === "arith_1digit") {
@@ -1679,13 +2037,11 @@
         q = generateSolidShapeQuestion();
       } else if (genre === "music_all") {
         q = generateMusicQuestion();
-      } else if (
-        genre === "import_mcq" ||
-        genre === "japanese_from_mcq" ||
-        genre === "colors_from_mcq"
-      ) {
-        q = generateImportMcqQuestion(genre);
+      } else if (genre.startsWith("mcq:")) {
+        const mcqGenreName = genre.slice("mcq:".length);
+        q = generateImportMcqQuestionForGenre(mcqGenreName);
         if (!q) {
+          // mcq 側で何も取れないときは簡単な算数でフォールバック
           const fallbackGenres = ["arith_1digit", "arith_2digit_column"];
           const fidx = Math.floor(Math.random() * fallbackGenres.length);
           q =
@@ -1729,7 +2085,8 @@
         `<div>` +
         `<ruby>つぎ<rt>つぎ</rt></ruby>の ` +
         `<ruby>計算<rt>けいさん</rt></ruby>を ` +
-        `<ruby>しましょう<rt>しましょう</rt></ruby>。</div>` +
+        `<ruby>しましょう<rt>しましょう</rt></ruby>。` +
+        `</div>` +
         `<div class="digit-question-wrapper">` +
         `<div style="font-size:28px;margin-top:4px;">${x} ${op} ${y} = ?</div>` +
         `</div>`;
@@ -1747,7 +2104,7 @@
     }
 
     // ============================================================
-    //  算数 二桁どうしの筆算（水平位置そろえ）
+    //  算数 二桁どうしの筆算
     // ============================================================
     function generateArith2DigitColumnQuestion() {
       let a = 10 + Math.floor(Math.random() * 90);
@@ -1765,7 +2122,8 @@
         `<div>` +
         `<ruby>つぎ<rt>つぎ</rt></ruby>の ` +
         `<ruby>筆算<rt>ひっさん</rt></ruby>を ` +
-        `<ruby>しましょう<rt>しましょう</rt></ruby>。</div>` +
+        `<ruby>しましょう<rt>しましょう</rt></ruby>。` +
+        `</div>` +
         `<div class="digit-question-wrapper">` +
         `<div class="vertical-expression">` +
         `<div class="vertical-expression-row">` +
@@ -1892,8 +2250,6 @@
         }
       });
 
-      // 放置時のみ OK ボタンを点滅させるため，
-      // 開始時にも「非ハイライト状態」からタイマーを起動する
       restartOkHintTimer();
 
       appState.quiz.currentQuestion.userDigits = userDigits;
@@ -1931,7 +2287,8 @@
         `<ruby>つぎ<rt>つぎ</rt></ruby>の ` +
         `<ruby>図形<rt>ずけい</rt></ruby>の ` +
         `<ruby>名前<rt>なまえ</rt></ruby>を ` +
-        `<ruby>えらびましょう<rt>えらびましょう</rt></ruby>。</div>` +
+        `<ruby>えらびましょう<rt>えらびましょう</rt></ruby>。` +
+        `</div>` +
         `<canvas id="planeShapeCanvas" class="shape-canvas" width="220" height="220"></canvas>`;
 
       const q = {
@@ -2029,7 +2386,8 @@
         `<ruby>つぎ<rt>つぎ</rt></ruby>の ` +
         `<ruby>立体<rt>りったい</rt></ruby>の ` +
         `<ruby>名前<rt>なまえ</rt></ruby>を ` +
-        `<ruby>えらびましょう<rt>えらびましょう</rt></ruby>。</div>` +
+        `<ruby>えらびましょう<rt>えらびましょう</rt></ruby>。` +
+        `</div>` +
         `<canvas id="solidShapeCanvas" class="solid-canvas" width="220" height="220"></canvas>`;
 
       const q = {
@@ -2074,7 +2432,6 @@
       const hiddenDash = [5, 4];
 
       if (def.kind === "sphere") {
-        // 球：輪郭は実線，赤道を細い破線で
         ctx.save();
         ctx.strokeStyle = "#000";
         ctx.fillStyle = "#e0e0e0";
@@ -2095,13 +2452,11 @@
         ctx.stroke();
         ctx.restore();
       } else if (def.kind === "cylinder") {
-        // 円柱：底の裏側を破線で
         const rX = 60;
         const rY = 12;
         const topY = cy - 50;
         const bottomY = cy + 50;
 
-        // 上のだ円（全部見えるとみなす）
         ctx.save();
         ctx.fillStyle = "#e0e0e0";
         ctx.strokeStyle = "#000";
@@ -2112,7 +2467,6 @@
         ctx.stroke();
         ctx.restore();
 
-        // 側面の線
         ctx.save();
         ctx.strokeStyle = "#000";
         ctx.lineWidth = visibleLineWidth;
@@ -2124,7 +2478,6 @@
         ctx.stroke();
         ctx.restore();
 
-        // 底の前側半分（実線）
         ctx.save();
         ctx.strokeStyle = "#000";
         ctx.lineWidth = visibleLineWidth;
@@ -2133,7 +2486,6 @@
         ctx.stroke();
         ctx.restore();
 
-        // 底の後ろ側半分（破線）
         ctx.save();
         ctx.strokeStyle = "#000";
         ctx.setLineDash(hiddenDash);
@@ -2144,14 +2496,12 @@
         ctx.stroke();
         ctx.restore();
       } else if (def.kind === "cone") {
-        // 円錐
         const baseY = cy + 50;
         const apexX = cx;
         const apexY = cy - 60;
         const rX = 60;
         const rY = 10;
 
-        // 側面三角形（実線）
         ctx.save();
         ctx.fillStyle = "#e0e0e0";
         ctx.strokeStyle = "#000";
@@ -2165,7 +2515,6 @@
         ctx.stroke();
         ctx.restore();
 
-        // 底 前側半分（実線）
         ctx.save();
         ctx.strokeStyle = "#000";
         ctx.lineWidth = visibleLineWidth;
@@ -2174,7 +2523,6 @@
         ctx.stroke();
         ctx.restore();
 
-        // 底 後ろ側半分（破線）
         ctx.save();
         ctx.strokeStyle = "#000";
         ctx.setLineDash(hiddenDash);
@@ -2190,7 +2538,6 @@
         const frontCenter = { x: cx - 20, y: cy + 25 };
         const offset = { x: 28, y: -28 };
 
-        // 正多角形を少し回転させて，どの辺も画面軸と平行にならないようにする
         const front = buildRegularPolygonPoints(
           frontCenter.x,
           frontCenter.y,
@@ -2205,7 +2552,6 @@
 
         const avgY = front.reduce((sum, p) => sum + p.y, 0) / front.length;
 
-        // 側面（見える側）を塗る
         ctx.save();
         ctx.fillStyle = "#e0e0e0";
         ctx.strokeStyle = "transparent";
@@ -2229,7 +2575,6 @@
         }
         ctx.restore();
 
-        // 前の多角形（塗りのみ）
         ctx.save();
         ctx.fillStyle = "#f5f5f5";
         ctx.beginPath();
@@ -2241,7 +2586,6 @@
         ctx.fill();
         ctx.restore();
 
-        // 奥の多角形（輪郭のみ・破線）
         ctx.save();
         ctx.strokeStyle = "#000";
         ctx.setLineDash(hiddenDash);
@@ -2250,7 +2594,6 @@
         strokePolygon(ctx, back);
         ctx.restore();
 
-        // 側面の辺
         for (let i = 0; i < sides; i++) {
           const f = front[i];
           const b = back[i];
@@ -2280,7 +2623,6 @@
           }
         }
 
-        // 前面の多角形の辺（手前：実線，奥側：破線）
         for (let i = 0; i < sides; i++) {
           const ni = (i + 1) % sides;
           const p1 = front[i];
@@ -2316,7 +2658,6 @@
         const sides = def.baseSides || 4;
         const baseRadius = 45;
         const baseCenter = { x: cx, y: cy + 30 };
-        // 正多角形を少し回転させて，どの辺も画面軸と平行にならないようにする
         const base = buildRegularPolygonPoints(
           baseCenter.x,
           baseCenter.y,
@@ -2329,7 +2670,6 @@
         const avgY =
           base.reduce((sum, p) => sum + p.y, 0) / base.length;
 
-        // 側面（三角形）のうち，手前側にある面をすべて塗る
         ctx.save();
         ctx.fillStyle = "#e0e0e0";
         ctx.strokeStyle = "transparent";
@@ -2350,12 +2690,11 @@
         }
         ctx.restore();
 
-        // 底面の辺：上側の辺を破線，下側を実線
         for (let i = 0; i < sides; i++) {
           const p1 = base[i];
           const p2 = base[(i + 1) % sides];
           const isBackEdge =
-            p1.y < avgY && p2.y < avgY; // 上にある辺を「奥」とみなす
+            p1.y < avgY && p2.y < avgY;
 
           if (isBackEdge) {
             ctx.save();
@@ -2382,7 +2721,6 @@
           }
         }
 
-        // 頂点からの辺：奥側は破線，手前は実線
         base.forEach((p) => {
           const isBackEdge = p.y < avgY;
           if (isBackEdge) {
@@ -2435,43 +2773,38 @@
       ctx.stroke();
     }
 
-    function fillPolygon(ctx, points) {
-      if (!points.length) return;
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) {
-        ctx.lineTo(points[i].x, points[i].y);
-      }
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-    }
-
     // ============================================================
-    //  音名クイズ（abcjs で実装）
+    //  音名クイズ（ト音記号 A3〜C6，ヘ音記号 C2〜E4）
     // ============================================================
     function generateMusicQuestion() {
-      const idx = Math.floor(Math.random() * MUSIC_NOTES.length);
-      const note = MUSIC_NOTES[idx];
+      const clefs = ["treble", "bass"];
+      const clef = clefs[Math.floor(Math.random() * clefs.length)];
+      const noteList = MUSIC_NOTES[clef] && MUSIC_NOTES[clef].length
+        ? MUSIC_NOTES[clef]
+        : MUSIC_NOTES.treble;
+      const idx = Math.floor(Math.random() * noteList.length);
+      const note = noteList[idx];
 
-      const allLetters = ["C", "D", "E", "F", "G", "A", "B"];
-      const others = allLetters.filter((l) => l !== note.letter);
-      shuffleArray(others);
-      const useLetters = [note.letter, ...others.slice(0, 3)];
-      shuffleArray(useLetters); // 正答が必ず含まれるようにした
-
-      const choices = useLetters.map((letter, i) => ({
+      const lettersOrdering = ["C", "D", "E", "F", "G", "A", "B"];
+      const choices = lettersOrdering.map((letter, i) => ({
         id: "music_" + i,
         html: letter,
         correct: letter === note.letter
       }));
 
+      const clefLabel =
+        clef === "treble"
+          ? "<ruby>ト音記号<rt>とおんきごう</rt></ruby>"
+          : "<ruby>ヘ音記号<rt>へおんきごう</rt></ruby>";
+
       const questionHtml =
         `<div>` +
         `<ruby>つぎ<rt>つぎ</rt></ruby>の ` +
+        `${clefLabel}の ` +
         `<ruby>おんぷ<rt>おんぷ</rt></ruby>の ` +
         `アルファベットおんめいを ` +
-        `<ruby>えらびましょう<rt>えらびましょう</rt></ruby>。</div>` +
+        `<ruby>えらびましょう<rt>えらびましょう</rt></ruby>。` +
+        `</div>` +
         `<div id="musicNoteContainer" class="music-abc-container"></div>`;
 
       const q = {
@@ -2480,7 +2813,8 @@
         questionHtml,
         choices,
         meta: {
-          musicNote: note
+          musicNote: note,
+          clef
         },
         correctSound: () => {
           AudioEngine.playNoteByMidi(note.midi);
@@ -2492,58 +2826,34 @@
         const el = document.getElementById(containerId);
         if (!el || typeof ABCJS === "undefined") return;
 
-        // シンプルな 1 小節・4 分音符 1 音だけの ABC 記譜
         const abcText =
           "X:1\n" +
           "L:1/4\n" +
-          "K:C clef=treble\n" +
+          `K:C clef=${clef}\n` +
           note.abc + "\n";
 
         ABCJS.renderAbc(containerId, abcText, {
-          responsive: "resize"
+          responsive: "resize",
+          add_classes: true,
+          staffwidth: 500,
+          scale: 2.0
         });
       };
+
+      // 選択肢を横一列に並べるためのフラグ
+      q.meta.layout = "horizontal-music";
 
       return q;
     }
 
     // ============================================================
-    //  mcq.csv からのインポート問題
+    //  mcq.csv からのインポート問題（ジャンル単位）
     // ============================================================
-    function generateImportMcqQuestion(sourceGroup) {
-      let targetGenres = [];
-
+    function generateImportMcqQuestionForGenre(genreName) {
       if (!appState.mcqLoaded || appState.mcqLoadError) {
         return null;
       }
-
-      if (!sourceGroup || sourceGroup === "import_mcq") {
-        targetGenres = Object.keys(appState.mcqByGenre);
-      } else if (sourceGroup === "japanese_from_mcq") {
-        const japSet = new Set([
-          "漢字の読み",
-          "漢字多肢選択",
-          "格助詞",
-          "助数詞",
-          "文脈からの単語"
-        ]);
-        targetGenres = Object.keys(appState.mcqByGenre).filter((g) =>
-          japSet.has(g)
-        );
-      } else if (sourceGroup === "colors_from_mcq") {
-        const colorSet = new Set(["色", "混色"]);
-        targetGenres = Object.keys(appState.mcqByGenre).filter((g) =>
-          colorSet.has(g)
-        );
-      }
-
-      if (!targetGenres.length) {
-        return null;
-      }
-
-      const gidx = Math.floor(Math.random() * targetGenres.length);
-      const genre = targetGenres[gidx];
-      const list = appState.mcqByGenre[genre];
+      const list = appState.mcqByGenre[genreName];
       if (!list || !list.length) return null;
       const idx = Math.floor(Math.random() * list.length);
       const item = list[idx];
@@ -2554,17 +2864,51 @@
       const tmp = document.createElement("div");
       tmp.innerHTML = item.choicesHtml;
       const lis = tmp.querySelectorAll("li");
-      const choices = [];
+      const allChoices = [];
       lis.forEach((li, i) => {
         const html = li.innerHTML;
         const correct = (li.getAttribute("data-correct") || "") === "1";
-        choices.push({
+        allChoices.push({
           id: "c" + i,
           html,
           correct
         });
       });
-      if (!choices.length) return null;
+      if (!allChoices.length) return null;
+
+      // 5 個以上の選択肢があっても，正答を必ず含めて最大 4 個に間引く
+      let choices;
+      if (allChoices.length <= 4) {
+        choices = allChoices.slice();
+      } else {
+        const correctChoices = allChoices.filter((c) => c.correct);
+        const wrongChoices = allChoices.filter((c) => !c.correct);
+        const pool = [];
+
+        if (correctChoices.length === 0) {
+          // 万一正答がマークされていない場合は，先頭を正答扱いにする
+          allChoices[0].correct = true;
+          correctChoices.push(allChoices[0]);
+          wrongChoices.splice(wrongChoices.indexOf(allChoices[0]), 1);
+        }
+
+        shuffleArray(correctChoices);
+        shuffleArray(wrongChoices);
+
+        // まず 1 つは正答を必ず入れる
+        pool.push(correctChoices[0]);
+
+        // 残り 3 枠に，正答残り + 誤答を混ぜてランダムに追加
+        const others = correctChoices.slice(1).concat(wrongChoices);
+        shuffleArray(others);
+        for (let i = 0; i < others.length && pool.length < 4; i++) {
+          pool.push(others[i]);
+        }
+
+        choices = pool;
+      }
+
+      shuffleArray(choices);
 
       return {
         type: "mcq",
@@ -2587,7 +2931,9 @@
 
     function renderMcqChoices(question) {
       const list = document.createElement("div");
-      list.className = "choice-list";
+      const isMusicHorizontal =
+        question.meta && question.meta.layout === "horizontal-music";
+      list.className = isMusicHorizontal ? "choice-list music-choice-list" : "choice-list";
 
       question.choices.forEach((ch) => {
         const btn = document.createElement("button");
@@ -2640,7 +2986,6 @@
 
       dom.correctOverlay.classList.add("active");
 
-      // 正答の丸の中心に「正解」を表示
       if (dom.correctMessage) {
         dom.correctMessage.classList.remove("blink");
         dom.correctMessage.style.visibility = "visible";
@@ -2676,8 +3021,6 @@
         }
       });
 
-      // 2 秒後に「正解」を消し，0.5 秒待ってから
-      // 「タッチして次へ」を 1 秒周期で点滅させる
       if (dom.correctMessage) {
         correctMessageTimeout1 = setTimeout(() => {
           if (!dom.correctOverlay.classList.contains("active")) return;
@@ -2768,11 +3111,11 @@
         showScreen("title");
       });
 
-      const toggles = document.querySelectorAll(".toggle");
-      toggles.forEach((tg) => {
-        tg.addEventListener("click", () => {
-          tg.classList.toggle("on");
-        });
+      // トグル用（ジャンル / showTimer / mcq のすべて）: デリゲーションで対応
+      document.addEventListener("click", (ev) => {
+        const tg = ev.target.closest(".toggle");
+        if (!tg) return;
+        tg.classList.toggle("on");
       });
     }
 
